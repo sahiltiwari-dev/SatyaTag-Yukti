@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+backend/.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Environment / secrets
+.env
+.env.local
+backend/.env
+
+# Uploaded evidence (runtime data — never commit)
+backend/uploads/*
+!backend/uploads/.gitkeep
+
+# Local database
+pgdata/
+*.log
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
