@@ -37,8 +37,10 @@ if ($LASTEXITCODE -ne 0) {
     Start-Sleep -Seconds 2
 }
 
-& (Join-Path $PgBin 'psql.exe') -h 127.0.0.1 -p $Port -U satyatag -d postgres -tc "SELECT 1 FROM pg_database WHERE datname='satyatag'" | Out-Null
-if ($LASTEXITCODE -ne 0 -or -not $?) {
+$env:PGPASSWORD = $Password
+$dbExists = & (Join-Path $PgBin 'psql.exe') -h 127.0.0.1 -p $Port -U satyatag -d postgres -w -tA -c "SELECT 1 FROM pg_database WHERE datname='satyatag'"
+if ($dbExists -notmatch '^\s*1\s*$') {
     & (Join-Path $PgBin 'createdb.exe') -h 127.0.0.1 -p $Port -U satyatag satyatag
 }
+Remove-Item Env:PGPASSWORD -ErrorAction SilentlyContinue
 Write-Host 'PostgreSQL ready: 127.0.0.1:5433 (database: satyatag)'
