@@ -1,23 +1,28 @@
-﻿import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
-import { KeyRound, ArrowRight, ShieldCheck, Eye, EyeOff } from 'lucide-react';
+import React, { useState } from 'react';
+import { useNavigate, Link, useSearchParams } from 'react-router-dom';
+import { KeyRound, ArrowRight, ShieldCheck, Eye, EyeOff, ExternalLink } from 'lucide-react';
 import { SatyaTagLogo, GovHeader } from '../components/Brand';
 import { useAuth } from '../context/AuthContext';
-import { useDemo } from '../context/DemoContext';
-import { userToOfficer } from '../services/auth';
+
+type Step = 'email' | 'sent' | 'password' | 'success';
 
 const ForgotPasswordPage: React.FC = () => {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { requestPasswordReset, resetPassword } = useAuth();
-  const { setOfficer } = useDemo();
-  const [step, setStep] = useState<'email' | 'otp' | 'password' | 'success'>('email');
-  const [email, setEmail] = useState('');
-  const [otp, setOtp] = useState('');
+
+  // A reset link from the email arrives as /reset-password?email=...&token=...
+  const linkEmail = searchParams.get('email') || '';
+  const linkToken = searchParams.get('token') || '';
+
+  const [step, setStep] = useState<Step>(linkEmail && linkToken ? 'password' : 'email');
+  const [email, setEmail] = useState(linkEmail);
+  const [token, setToken] = useState(linkToken);
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [devOtp, setDevOtp] = useState('');
+  const [devResetUrl, setDevResetUrl] = useState('');
   const [showPwd, setShowPwd] = useState(false);
 
   const handleEmailSubmit = async (e: React.FormEvent) => {
@@ -27,15 +32,8 @@ const ForgotPasswordPage: React.FC = () => {
     const result = await requestPasswordReset(email);
     setLoading(false);
     if (!result.success) { setError(result.error || 'Failed'); return; }
-    if (result.devOtp) setDevOtp(result.devOtp);
-    setStep('otp');
-  };
-
-  const handleOtpSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (otp.length !== 6) { setError('Enter a 6-digit code'); return; }
-    setError('');
-    setStep('password');
+    if (result.devResetUrl) setDevResetUrl(result.devResetUrl);
+    setStep('sent');
   };
 
   const handlePasswordSubmit = async (e: React.FormEvent) => {
@@ -43,16 +41,14 @@ const ForgotPasswordPage: React.FC = () => {
     setError('');
     if (newPassword.length < 6) { setError('Password must be at least 6 characters'); return; }
     if (newPassword !== confirmPassword) { setError('Passwords do not match'); return; }
+    if (!token) { setError('Reset link is incomplete. Request a new link.'); return; }
     setLoading(true);
-    const result = await resetPassword(email, otp, newPassword);
+    const result = await resetPassword(email, token, newPassword);
     setLoading(false);
     if (!result.success) { setError(result.error || 'Reset failed'); return; }
     setStep('success');
-    const { getCurrentUser } = await import('../services/auth');
-    const user = getCurrentUser();
-    if (user) setOfficer(userToOfficer(user));
-    setTimeout(() => navigate('/dashboard'), 2000);
   };
+
   const inputClass = 'w-full rounded-button border border-navy-600 bg-navy-800/60 px-3.5 py-2.5 text-sm text-white placeholder-slate-500 focus:border-govblue-500 focus:outline-none focus:ring-1 focus:ring-govblue-500';
 
   return (
@@ -68,50 +64,64 @@ const ForgotPasswordPage: React.FC = () => {
           {error && (
             <div className="mb-4 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-400">{error}</div>
           )}
+
           {step === 'success' && (
             <div className="flex flex-col items-center py-6">
               <ShieldCheck className="mb-4 h-12 w-12 text-compliant-500" />
-              <p className="text-sm font-medium text-white">Password reset successfully!</p>
-              <p className="mt-1 text-xs text-slate-400">Redirecting to dashboard...</p>
+              <p className="text-sm font-medium text-white">Password reset successfully</p>
+              <p className="mt-1 text-xs text-slate-400">Sign in with your new password to continue.</p>
+              <button
+                onClick={() => navigate('/login')}
+                className="mt-5 flex w-full items-center justify-center gap-2 rounded-button bg-govblue-600 py-3 text-sm font-semibold text-white transition-colors hover:bg-govblue-700"
+              >
+                Back to Sign In <ArrowRight className="h-4 w-4" />
+              </button>
             </div>
           )}
-          {step === 'email' && (
+{step === 'email' && (
             <form onSubmit={handleEmailSubmit} className="space-y-4">
-              <p className="text-sm text-slate-400">Enter your registered email address. We'll send a verification code.</p>
+              <p className="text-sm text-slate-400">
+                Enter your account email and we'll send a secure reset link.
+              </p>
               <label className="block">
                 <span className="mb-1 block text-xs font-medium text-slate-300">Email Address</span>
-                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@consumer.gov.in" className={inputClass} required />
+                <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@consumer.gov.in" className={inputClass} required />
               </label>
               <button type="submit" disabled={loading}
                 className="flex w-full items-center justify-center gap-2 rounded-button bg-govblue-600 py-3 text-sm font-semibold text-white transition-colors hover:bg-govblue-700 disabled:opacity-50">
-                {loading ? 'Sending...' : 'Send Verification Code'} <ArrowRight className="h-4 w-4" />
+                {loading ? 'Sending...' : 'Send Reset Link'} <ArrowRight className="h-4 w-4" />
               </button>
             </form>
           )}
-          {step === 'otp' && (
-            <form onSubmit={handleOtpSubmit} className="space-y-4">
-              <p className="text-sm text-slate-400">Enter the 6-digit code sent to your email.</p>
-              {devOtp && (
+
+          {step === 'sent' && (
+            <div className="space-y-4">
+              <p className="text-sm text-slate-400">
+                If an account exists for <span className="font-medium text-white">{email}</span>,
+                a reset link has been sent to the registered email address.
+              </p>
+              {devResetUrl && (
                 <div className="rounded-lg border border-govblue-500/30 bg-govblue-500/10 px-3 py-2">
-                  <p className="text-[10px] font-medium text-govblue-400">DEV MODE \u2014 OTP:</p>
-                  <p className="text-lg font-bold tracking-widest text-govblue-300">{devOtp}</p>
+                  <p className="text-[10px] font-medium text-govblue-400">DEV MODE \u2014 RESET LINK:</p>
+                  <a href={devResetUrl} target="_blank" rel="noreferrer"
+                    className="mt-1 flex items-center gap-1 break-all text-xs text-govblue-300 hover:text-govblue-200">
+                    <ExternalLink className="h-3 w-3 shrink-0" /> {devResetUrl}
+                  </a>
                 </div>
               )}
-              <label className="block">
-                <span className="mb-1 block text-xs font-medium text-slate-300">Verification Code</span>
-                <input type="text" value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, '').slice(0, 6))}
-                  placeholder="000000" maxLength={6}
-                  className="w-full rounded-button border border-navy-600 bg-navy-800/60 px-3.5 py-3 text-center text-lg font-mono tracking-[0.5em] text-white placeholder-slate-500 focus:border-govblue-500 focus:outline-none focus:ring-1 focus:ring-govblue-500" required />
-              </label>
-              <button type="submit" disabled={otp.length !== 6}
-                className="flex w-full items-center justify-center gap-2 rounded-button bg-govblue-600 py-3 text-sm font-semibold text-white transition-colors hover:bg-govblue-700 disabled:opacity-50">
-                Continue <ArrowRight className="h-4 w-4" />
+              <button
+                onClick={() => setStep('email')}
+                className="w-full rounded-button border border-navy-600 py-3 text-xs font-medium text-slate-300 hover:bg-navy-800"
+              >
+                Use a different email
               </button>
-            </form>
+            </div>
           )}
+
           {step === 'password' && (
             <form onSubmit={handlePasswordSubmit} className="space-y-4">
-              <p className="text-sm text-slate-400">Enter your new password below.</p>
+              <p className="text-sm text-slate-400">Choose a new password for <span className="font-medium text-white">{email}</span>.</p>
               <label className="block">
                 <span className="mb-1 block text-xs font-medium text-slate-300">New Password</span>
                 <div className="relative">
@@ -132,7 +142,9 @@ const ForgotPasswordPage: React.FC = () => {
             </form>
           )}
         </div>
-        <p className="mt-5 text-center text-xs text-slate-500"><Link to="/login" className="text-govblue-400 hover:text-govblue-300">\u2190 Back to Sign In</Link></p>
+        <p className="mt-5 text-center text-xs text-slate-500">
+          <Link to="/login" className="text-govblue-400 hover:text-govblue-300">\u2190 Back to Sign In</Link>
+        </p>
       </div>
     </div>
   );

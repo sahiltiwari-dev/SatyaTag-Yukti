@@ -22,7 +22,8 @@ export type UserRole = 'officer' | 'supervisor' | 'admin';
 export interface UserAccount {
   id: string;
   email: string;
-  passwordHash: string;
+  /** Never stored client-side — kept only for type compat with legacy demo code. */
+  passwordHash?: string;
   fullName: string;
   role: UserRole;
   department: string;

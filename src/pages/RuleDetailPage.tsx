@@ -1,10 +1,12 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { BookOpen, Clock, ShieldCheck, CheckCircle2, ChevronRight } from 'lucide-react';
+import { BookOpen, Clock, ShieldCheck, CheckCircle2, ChevronRight, ExternalLink } from 'lucide-react';
 import { PageHeader } from '../components/common/PageHeader';
 import { Card, Button } from '../components/common/Button';
 import { StatusBadge, DemoTag } from '../components/common/StatusBadge';
 import { demoRules } from '../data/demoRules';
+import { useAuth } from '../context/AuthContext';
+import * as legalApi from '../services/legal';
 
 type Tab = 'overview' | 'requirements' | 'history' | 'references';
 
@@ -18,21 +20,40 @@ const tabs: { key: Tab; label: string }[] = [
 const RuleDetailPage: React.FC = () => {
   const navigate = useNavigate();
   const { ruleId } = useParams();
+  const { isAuthenticated } = useAuth();
   const [tab, setTab] = useState<Tab>('overview');
-  const rule = demoRules.find((r) => r.id === ruleId) || demoRules[0];
+  const [liveRule, setLiveRule] = useState<legalApi.LegalRule | null>(null);
 
-  const relatedRules = demoRules
-    .filter((r) => r.id !== rule.id && (r.category === rule.category || r.subcategory === rule.subcategory))
+  useEffect(() => {
+    if (!isAuthenticated || !ruleId) return;
+    legalApi.getRule(ruleId).then(setLiveRule).catch(() => undefined);
+  }, [isAuthenticated, ruleId]);
+
+  const rule = liveRule || (demoRules.find((r: any) => r.id === ruleId) as any) || demoRules[0];
+  const isLive = !!liveRule;
+  const relatedRules = (demoRules as any[])
+    .filter((r: any) => r.id !== rule.id && (r.category === rule.category || r.subcategory === rule.subcategory))
     .slice(0, 3);
+  const title = rule.title || '';
+  const description = rule.description || '';
+  const ruleNumber = rule.rule_number || rule.ruleId || '';
+  const version = liveRule
+    ? (rule.versions?.[0]?.version || '1.0')
+    : (rule.version || '1.0');
+  const checkType = rule.check_type || rule.checkType || 'PRESENCE';
+  const status = rule.status || 'CURRENT';
+  const severity = rule.severity || 'INFO';
+  const sourceUrl = rule.document?.source_url || null;
+  const effectiveDate = rule.document?.effective_date || rule.effectiveFrom || '—';
 
   return (
     <div className="space-y-5 animate-[fadeIn_0.3s_ease-out]">
-      <PageHeader title={rule.title} subtitle={`${rule.ruleId} · Version ${rule.version}`} icon={ShieldCheck} backTo="/rules" />
-      <DemoTag label="DEMO RULE" className="w-fit" />
+      <PageHeader title={title} subtitle={`${ruleNumber} · Version ${version}`} icon={ShieldCheck} backTo="/rules" />
+      {isLive ? <DemoTag label="LIVE LEGAL DATABASE" className="w-fit" /> : <DemoTag label="DEMO RULE" className="w-fit" />}
 
       <div className="flex items-center gap-2">
-        <StatusBadge status={rule.status} small />
-        <StatusBadge status={rule.severity} small />
+        <StatusBadge status={status} small />
+        <StatusBadge status={severity} small />
         <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-600">{rule.category}</span>
       </div>
 
@@ -48,17 +69,23 @@ const RuleDetailPage: React.FC = () => {
       {tab === 'overview' && (
         <Card>
           <div className="space-y-3 text-sm">
-            <p className="text-slate-600">{rule.description}</p>
+            <p className="text-slate-600">{description}</p>
             <div className="grid grid-cols-2 gap-3 pt-2">
-              <InfoField label="Rule ID" value={rule.ruleId} />
+              <InfoField label="Rule Number" value={ruleNumber} />
               <InfoField label="Category" value={rule.category} />
               <InfoField label="Subcategory" value={rule.subcategory} />
-              <InfoField label="Check Type" value={rule.checkType} />
-              <InfoField label="Severity" value={rule.severity} />
-              <InfoField label="Machine Checkable" value={rule.machineCheckable ? 'Yes' : 'No'} />
-              <InfoField label="Effective From" value={rule.effectiveFrom} />
-              <InfoField label="Status" value={rule.status} />
+              <InfoField label="Check Type" value={checkType} />
+              <InfoField label="Severity" value={severity} />
+              <InfoField label="Machine Checkable" value={rule.machineCheckable === false ? 'No' : 'Yes'} />
+              <InfoField label="Effective From" value={effectiveDate} />
+              <InfoField label="Status" value={status} />
             </div>
+            {sourceUrl && (
+              <a href={sourceUrl} target="_blank" rel="noreferrer"
+                className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-govblue-600 hover:underline">
+                Official source <ExternalLink className="h-3 w-3" />
+              </a>
+            )}
           </div>
         </Card>
       )}

@@ -17,6 +17,7 @@ from app.models.enums import AccountStatus, UserRole
 from app.schemas.auth import (
     ChangePasswordRequest,
     ForgotPasswordRequest,
+    ForgotPasswordResponse,
     LoginRequest,
     LoginResponse,
     OTPResponse,
@@ -73,10 +74,22 @@ def signup(payload: SignupRequest, request: Request, db: Session = Depends(get_d
     db.commit()
     db.refresh(user)
 
+    # Fire the first OTP so the frontend can proceed straight to /verify-email.
+    dev_otp: str | None = None
+    from app.services.verification import issue_email_otp
+
+    try:
+        otp_result = issue_email_otp(db, user)
+        dev_otp = otp_result.get("dev_otp")
+    except ValueError:
+        # Cooldown table should be empty for a brand-new user; ignore edge case.
+        pass
+
     return SignupResponse(
         user=UserOut.model_validate(user),
         message="Account created. Please verify your email to activate your account.",
         masked_email=mask_email(email),
+        dev_otp=dev_otp,
     )
 
 
@@ -293,6 +306,7 @@ def resend_otp(
         message="Verification code sent to your inbox.",
         masked_email=mask_email(user.email),
         cooldown_seconds=settings_otp_cooldown(),
+        dev_otp=result.get("dev_otp"),
     )
 
 
@@ -307,7 +321,7 @@ def settings_otp_cooldown() -> int:
 # ---------------------------------------------------------------------------
 
 
-@router.post("/forgot-password", status_code=status.HTTP_200_OK)
+@router.post("/forgot-password", response_model=ForgotPasswordResponse)
 def forgot_password(
     payload: ForgotPasswordRequest,
     request: Request,
@@ -315,12 +329,13 @@ def forgot_password(
 ):
     from app.services.verification import issue_password_reset
 
-    issue_password_reset(db, payload.email)
-    return {
-        "message": (
+    dev_reset_url = issue_password_reset(db, payload.email)
+    return ForgotPasswordResponse(
+        message=(
             "If an account exists for this email, a reset link has been sent."
-        )
-    }
+        ),
+        dev_reset_url=dev_reset_url,
+    )
 
 
 @router.post("/reset-password", status_code=status.HTTP_200_OK)

@@ -9,6 +9,7 @@ import { Stepper } from '../components/common/Stepper';
 import { StatusBadge, DemoTag } from '../components/common/StatusBadge';
 import { Modal } from '../components/common/Modal';
 import { useDemo } from '../context/DemoContext';
+import { useAuth } from '../context/AuthContext';
 import { validateImageFile, fileToDataUrl, readImageMeta, deriveQuality, qualityTier, downscaleImage } from '../utils/images';
 
 interface SurfaceDef {
@@ -29,6 +30,7 @@ const SURFACES: SurfaceDef[] = [
 const ScanProductPage: React.FC = () => {
   const navigate = useNavigate();
   const { inspection, setSurfaceImage, removeSurfaceImage, updateStage, addAudit } = useDemo();
+  const { isAuthenticated } = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [activeSurface, setActiveSurface] = useState<SurfaceDef['key']>('Front');
   const [error, setError] = useState<string | null>(null);
@@ -55,7 +57,7 @@ const ScanProductPage: React.FC = () => {
       const score = deriveQuality(meta);
       const tier = qualityTier(score);
       const dataUrl = await downscaleImage(rawDataUrl);
-      setSurfaceImage(activeSurface, dataUrl, file.name);
+      await setSurfaceImage(activeSurface, dataUrl, file.name);
       addAudit(`${activeSurface} evidence uploaded`, inspection.inspectionId, 'Success');
       addAudit(`Quality: ${tier} (${score}%)`, file.name, 'Success');
     } catch {
@@ -154,7 +156,7 @@ const ScanProductPage: React.FC = () => {
                         <button onClick={() => handleReplace(surf.key)} className="inline-flex items-center gap-1 rounded-button bg-slate-100 px-2 py-1 text-[10px] font-medium text-slate-700 hover:bg-slate-200">
                           <RefreshCcw className="h-3 w-3" /> Replace
                         </button>
-                        <button onClick={() => { removeSurfaceImage(surf.key); addAudit(`${surf.label} evidence removed`, inspection.inspectionId, 'Success'); }} className="inline-flex items-center gap-1 rounded-button bg-violation-50 px-2 py-1 text-[10px] font-medium text-violation-600 hover:bg-violation-100">
+                        <button onClick={() => { void removeSurfaceImage(surf.key).then(() => addAudit(`${surf.label} evidence removed`, inspection.inspectionId, 'Success')); }} className="inline-flex items-center gap-1 rounded-button bg-violation-50 px-2 py-1 text-[10px] font-medium text-violation-600 hover:bg-violation-100">
                           <Trash2 className="h-3 w-3" /> Remove
                         </button>
                       </div>
@@ -202,7 +204,16 @@ const ScanProductPage: React.FC = () => {
       >
         Continue to Analysis
       </Button>
-      <div className="flex justify-center"><DemoTag label="DEMO EVIDENCE" /></div>
+      <div className="flex justify-center">
+        {isAuthenticated ? (
+          <span className="inline-flex items-center gap-1 rounded-md bg-compliant-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-compliant-700">
+            <span className="h-1.5 w-1.5 rounded-full bg-compliant-500" />
+            Evidence saved to SATYATAG database
+          </span>
+        ) : (
+          <DemoTag label="DEMO EVIDENCE" />
+        )}
+      </div>
 
       <Modal open={!!preview} onClose={() => setPreview(null)} title={preview ? `${preview.surface} — Image Preview` : ''} wide>
         {preview && (

@@ -4,21 +4,34 @@ import { ClipboardList, Calendar, MapPin, Tag, Camera, Globe, ArrowRight, Info }
 import { PageHeader } from '../components/common/PageHeader';
 import { Card, Button } from '../components/common/Button';
 import { Stepper } from '../components/common/Stepper';
-import { DemoTag } from '../components/common/StatusBadge';
 import { useDemo } from '../context/DemoContext';
+import { useAuth } from '../context/AuthContext';
 
 const NewInspectionPage: React.FC = () => {
   const navigate = useNavigate();
-  const { inspection, updateStage } = useDemo();
+  const { createRealInspection, officer } = useDemo();
+  const { user, isAuthenticated } = useAuth();
   const [inspectionType, setInspectionType] = useState<'Routine' | 'Complaint' | 'Follow-up'>('Routine');
   const [mode, setMode] = useState<'Physical Package' | 'Product Listing'>('Physical Package');
+  const [location, setLocation] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [error, setError] = useState('');
 
-  const handleContinue = () => {
-    updateStage('SETUP');
-    if (mode === 'Product Listing') {
-      navigate(`/inspection/${inspection.inspectionId}/listing`);
-    } else {
-      navigate(`/inspection/${inspection.inspectionId}/scan`);
+  const handleContinue = async () => {
+    setError('');
+    if (!isAuthenticated) {
+      setError('Please sign in before creating an inspection.');
+      return;
+    }
+    setCreating(true);
+    try {
+      const created = await createRealInspection(inspectionType, mode, location.trim());
+      navigate(mode === 'Product Listing'
+        ? `/inspection/${created.inspectionId}/listing`
+        : `/inspection/${created.inspectionId}/scan`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not create the inspection.');
+      setCreating(false);
     }
   };
 
@@ -28,13 +41,21 @@ const NewInspectionPage: React.FC = () => {
 
       <Stepper steps={['Inspection Setup', 'Scan Product', 'Analyse Information', 'View Result']} current={1} />
 
-      <Card title="Inspection Details" subtitle="Auto-generated for this demo inspection">
+      <Card title="Inspection Details" subtitle="Saved to the SATYATAG database">
         <div className="space-y-3">
-          <DetailRow icon={Tag} label="Inspection ID" value={inspection.inspectionId} />
-          <DetailRow icon={ClipboardList} label="Officer" value={`${inspection.officer.name} (Demo Officer)`} />
-          <DetailRow icon={Calendar} label="Date & Time" value={inspection.createdAt} />
-          <DetailRow icon={MapPin} label="Location" value={inspection.location} />
+          <DetailRow icon={Tag} label="Officer" value={user ? `${user.fullName} (${user.department || 'Enforcement Officer'})` : officer.name} />
+          <DetailRow icon={Calendar} label="Date & Time" value={new Date().toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })} />
+          <DetailRow icon={MapPin} label="Location" value={location || '—'} />
         </div>
+      </Card>
+
+      <Card title="Inspection Location">
+        <input
+          value={location}
+          onChange={(e) => setLocation(e.target.value)}
+          placeholder="e.g. Retail Store, Chandni Chowk, Delhi"
+          className="w-full rounded-button border border-slate-200 bg-white px-3 py-2.5 text-sm text-navy-900 placeholder-slate-400 focus:border-govblue-500 focus:outline-none focus:ring-1 focus:ring-govblue-500"
+        />
       </Card>
 
       <Card title="Inspection Type">
@@ -78,14 +99,18 @@ const NewInspectionPage: React.FC = () => {
 
       <div className="rounded-card border border-govblue-100 bg-govblue-50/50 p-3 flex items-start gap-2">
         <Info className="mt-0.5 h-4 w-4 shrink-0 text-govblue-500" />
-        <p className="text-xs text-slate-600">You can scan multiple products in this inspection.</p>
+        <p className="text-xs text-slate-600">You can scan multiple products in this inspection. Records are stored in the SATYATAG database and remain available after refresh.</p>
       </div>
 
-      <Button onClick={handleContinue} icon={ArrowRight} fullWidth size="lg">
-        Continue to {mode === 'Physical Package' ? 'Scan' : 'Product Listing'}
-      </Button>
+      {error && (
+        <div className="rounded-card border border-violation-200 bg-violation-50 p-3 text-sm text-violation-700">
+          {error}
+        </div>
+      )}
 
-      <DemoTag label="DEMO MODE" className="mx-auto flex w-fit" />
+      <Button onClick={handleContinue} icon={ArrowRight} fullWidth size="lg" loading={creating}>
+        {creating ? 'Creating Inspection…' : `Continue to ${mode === 'Physical Package' ? 'Scan' : 'Product Listing'}`}
+      </Button>
     </div>
   );
 };

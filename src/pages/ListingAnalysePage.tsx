@@ -6,6 +6,8 @@ import { Stepper } from '../components/common/Stepper';
 import { Card, Button } from '../components/common/Button';
 import { StatusBadge, DemoTag } from '../components/common/StatusBadge';
 import { useDemo } from '../context/DemoContext';
+import { useAuth } from '../context/AuthContext';
+import * as platformApi from '../services/platform';
 
 interface ListingDetail {
   label: string;
@@ -13,35 +15,83 @@ interface ListingDetail {
   status: 'OK' | 'MISSING';
 }
 
+interface BackendListingResult {
+  issues: string[];
+  ok_checks: string[];
+}
+
 const ListingAnalysePage: React.FC = () => {
   const navigate = useNavigate();
   const { id } = useParams();
   const location = useLocation();
-  const { updateStage, addAudit } = useDemo();
+  const { updateStage, addAudit, repositoryOrigin } = useDemo();
+  const { isAuthenticated } = useAuth();
   const url = (location.state as { url?: string } | null)?.url || 'https://mware.in/p/maggi-2-minute-noodles-70g';
 
   const [phase, setPhase] = useState<'extracting' | 'analyzing' | 'done'>('extracting');
   const [details, setDetails] = useState<ListingDetail[]>([]);
+  const [backendIssues, setBackendIssues] = useState<string[]>([]);
+  const [backendOk, setBackendOk] = useState<string[]>([]);
+  const [backendUsed, setBackendUsed] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
     let t1: ReturnType<typeof setTimeout>;
     let t2: ReturnType<typeof setTimeout>;
-    t1 = setTimeout(() => {
-      setPhase('analyzing');
-      const missing = url.includes('surf') || url.includes('good-day');
-      setDetails([
-        { label: 'Product Name', value: 'Surf Excel Detergent 500ml', status: 'OK' },
-        { label: 'MRP', value: missing ? 'Not displayed' : '₹145.00', status: missing ? 'MISSING' : 'OK' },
-        { label: 'Net Quantity', value: missing ? 'Not displayed' : '500 ml', status: missing ? 'MISSING' : 'OK' },
-        { label: 'Manufacturer Details', value: 'Not displayed', status: 'MISSING' },
-        { label: 'Date of Manufacture', value: 'Not applicable (fake data)', status: 'OK' },
-        { label: 'Country of Origin', value: missing ? 'Not displayed' : 'India', status: missing ? 'MISSING' : 'OK' },
-      ]);
-      addAudit('Listing extracted', url, 'Success');
-    }, 1400);
-    t2 = setTimeout(() => setPhase('done'), 2600);
-    return () => { clearTimeout(t1); clearTimeout(t2); };
-  }, [url, addAudit]);
+
+    const runBackendListing = async () => {
+      if (!isAuthenticated || !id || repositoryOrigin !== 'backend') return false;
+      try {
+        const created = await platformApi.createListingCheck(id, {
+          listing_url: url,
+          listing_title: url.split('/').pop() || 'Product Listing',
+        });
+        const result = await platformApi.analyseListing(id, created.id);
+        if (cancelled) return true;
+        setBackendUsed(true);
+        setBackendIssues(result.results.issues || []);
+        setBackendOk(result.results.ok_checks || []);
+        // Derive a simple detail grid from machine checks.
+        const missing = (result.results.issues || []);
+        setDetails([
+          { label: 'Product Name', value: url.split('/').pop()?.replace(/-/g, ' ') || 'Product Listing', status: 'OK' },
+          { label: 'Listed Price vs MRP', value: missing.some((i) => i.includes('exceeds the MRP')) ? 'Above MRP' : 'Within MRP', status: missing.some((i) => i.includes('exceeds the MRP')) ? 'MISSING' : 'OK' },
+          { label: 'Net Quantity Declared', value: missing.some((i) => i.includes('net quantity')) ? 'Not displayed' : 'Declared', status: missing.some((i) => i.includes('net quantity')) ? 'MISSING' : 'OK' },
+          { label: 'Seller Identity', value: missing.some((i) => i.includes('seller')) ? 'Not identified' : 'Identified', status: missing.some((i) => i.includes('seller')) ? 'MISSING' : 'OK' },
+        ]);
+        setPhase('done');
+        addAudit('Listing persisted & analysed (backend)', id, 'Success');
+        return true;
+      } catch (e) {
+        console.error('Backend listing analysis failed, falling back to demo.', e);
+        return false;
+      }
+    };
+
+    (async () => {
+      if (await runBackendListing()) return;
+      t1 = setTimeout(() => {
+        setPhase('analyzing');
+        const missing = url.includes('surf') || url.includes('good-day');
+        setDetails([
+          { label: 'Product Name', value: 'Surf Excel Detergent 500ml', status: 'OK' },
+          { label: 'MRP', value: missing ? 'Not displayed' : '₹145.00', status: missing ? 'MISSING' : 'OK' },
+          { label: 'Net Quantity', value: missing ? 'Not displayed' : '500 ml', status: missing ? 'MISSING' : 'OK' },
+          { label: 'Manufacturer Details', value: 'Not displayed', status: 'MISSING' },
+          { label: 'Date of Manufacture', value: 'Not applicable (fake data)', status: 'OK' },
+          { label: 'Country of Origin', value: missing ? 'Not displayed' : 'India', status: missing ? 'MISSING' : 'OK' },
+        ]);
+        addAudit('Listing extracted', url, 'Success');
+      }, 1400);
+      t2 = setTimeout(() => { if (!cancelled) setPhase('done'); }, 2600);
+    })();
+
+    return () => {
+      cancelled = true;
+      if (t1) clearTimeout(t1);
+      if (t2) clearTimeout(t2);
+    };
+  }, [url, addAudit, isAuthenticated, id, repositoryOrigin]);
 
   const missCount = details.filter((d) => d.status === 'MISSING').length;
 
@@ -116,6 +166,28 @@ const ListingAnalysePage: React.FC = () => {
               ))}
             </div>
           </Card>
+
+          <Button onClick={handleResult} icon={ChevronRight} fullWidth size="lg">
+            View Compliance Result
+          </Button>
+          {backendUsed && (
+            <Card title="Engine Findings" subtitle="Deterministic checks against the captured package">
+              <div className="space-y-2">
+                {backendIssues.map((i, idx) => (
+                  <div key={`b-issue-${idx}`} className="flex items-start gap-2 rounded-lg border border-violation-100 bg-violation-50 px-3 py-2 text-xs text-violation-700">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                    <span>{i}</span>
+                  </div>
+                ))}
+                {backendOk.map((o, idx) => (
+                  <div key={`b-ok-${idx}`} className="flex items-start gap-2 rounded-lg border border-compliant-100 bg-compliant-50 px-3 py-2 text-xs text-compliant-700">
+                    <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+                    <span>{o}</span>
+                  </div>
+                ))}
+              </div>
+            </Card>
+          )}
 
           <Button onClick={handleResult} icon={ChevronRight} fullWidth size="lg">
             View Compliance Result

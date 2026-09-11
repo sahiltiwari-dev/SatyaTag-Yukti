@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, ChevronRight, MapPin, Calendar, Building2, FileText } from 'lucide-react';
+import { Search, ChevronRight, MapPin, Calendar, Building2, FileText, Loader2 } from 'lucide-react';
 import { PageHeader } from '../components/common/PageHeader';
 import { Button } from '../components/common/Button';
-import { StatusBadge, DemoTag } from '../components/common/StatusBadge';
+import { StatusBadge } from '../components/common/StatusBadge';
 import { useDemo } from '../context/DemoContext';
 
 interface RepoItem {
@@ -19,9 +19,10 @@ interface RepoItem {
 
 const RepositoryPage: React.FC = () => {
   const navigate = useNavigate();
-  const { allInspections } = useDemo();
+  const { allInspections, loadInspection, repositoryOrigin, isRepoLoading } = useDemo();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
+  const [opening, setOpening] = useState(false);
 
   const frontImage = (insp: typeof allInspections[number]) =>
     insp.evidence.find((e) => e.surface === 'Front' && e.imageUrl && !e.isPlaceholder)?.imageUrl
@@ -43,7 +44,7 @@ const RepositoryPage: React.FC = () => {
     image: frontImage(insp),
   }));
 
-  const filters = ['ALL', 'Compliant', 'Manual Review', 'Non-Compliant'];
+  const filters = ['ALL', 'Draft', 'In Progress', 'Under Review', 'Manual Review', 'Compliant', 'Non-Compliant'];
 
   const filtered = repoItems.filter((item) => {
     if (search && !item.product.toLowerCase().includes(search.toLowerCase()) && !item.id.toLowerCase().includes(search.toLowerCase())) return false;
@@ -51,10 +52,25 @@ const RepositoryPage: React.FC = () => {
     return true;
   });
 
+  const openInspection = async (id: string) => {
+    if (repositoryOrigin !== 'backend') {
+      navigate(`/inspection/${id}/result`);
+      return;
+    }
+    setOpening(true);
+    try {
+      await loadInspection(id);
+      navigate(`/inspection/${id}/result`);
+    } catch (e) {
+      console.error('Could not open inspection.', e);
+    } finally {
+      setOpening(false);
+    }
+  };
+
   return (
     <div className="space-y-5 animate-[fadeIn_0.3s_ease-out]">
-      <PageHeader title="Inspection Repository" subtitle="Browse and search past inspections" icon={Building2} />
-      <DemoTag label="DEMO DATA" className="w-fit" />
+      <PageHeader title="Inspection Repository" subtitle="Browse and search inspections from the SATYATAG database" icon={Building2} />
 
       <div className="flex gap-2">
         <div className="relative flex-1">
@@ -73,9 +89,15 @@ const RepositoryPage: React.FC = () => {
         ))}
       </div>
 
+      {isRepoLoading && (
+        <div className="flex items-center gap-2 rounded-card border border-slate-200 bg-white p-4 text-sm text-slate-500">
+          <Loader2 className="h-4 w-4 animate-spin" /> Loading inspections from database…
+        </div>
+      )}
+
       <div className="space-y-2">
         {filtered.map((item) => (
-          <button key={item.id} onClick={() => navigate(`/inspection/${item.id}/result`)}
+          <button key={item.id} onClick={() => openInspection(item.id)} disabled={opening}
             className="w-full rounded-card border border-slate-200 bg-white p-4 text-left transition-all hover:shadow-card">
             <div className="flex items-start gap-3">
               {item.image ? (
@@ -105,14 +127,14 @@ const RepositoryPage: React.FC = () => {
         ))}
       </div>
 
-      {filtered.length === 0 && (
+      {!isRepoLoading && filtered.length === 0 && (
         <div className="rounded-card border border-dashed border-slate-300 p-8 text-center">
           <p className="text-sm text-slate-500">No inspections match your filters</p>
         </div>
       )}
 
       {allInspections.length > 0 && (
-        <Button variant="outline" fullWidth icon={FileText} onClick={() => navigate(`/inspection/${allInspections[allInspections.length - 1].inspectionId}/report`)}>
+        <Button variant="outline" fullWidth icon={FileText} onClick={() => openInspection(allInspections[allInspections.length - 1].inspectionId)}>
           Open Inspection Report
         </Button>
       )}

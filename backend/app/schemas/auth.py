@@ -50,6 +50,7 @@ class SignupResponse(BaseModel):
     user: UserOut
     message: str
     masked_email: str
+    dev_otp: Optional[str] = Field(None, description="Dev-only: raw OTP (console mode)")
 
 
 class LoginRequest(BaseModel):
@@ -76,11 +77,16 @@ class OTPResponse(BaseModel):
     message: str
     masked_email: str
     cooldown_seconds: Optional[int] = None
-    dev_otp: Optional[str] = None
+    dev_otp: Optional[str] = Field(None, description="Dev-only: raw OTP (console mode)")
 
 
 class ForgotPasswordRequest(BaseModel):
     email: EmailStr
+
+
+class ForgotPasswordResponse(BaseModel):
+    message: str
+    dev_reset_url: Optional[str] = Field(None, description="Dev-only reset URL (console mode)")
 
 
 class ResetPasswordRequest(BaseModel):

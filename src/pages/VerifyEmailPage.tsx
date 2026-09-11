@@ -1,16 +1,13 @@
-﻿import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { ShieldCheck, RefreshCw, ArrowRight } from 'lucide-react';
 import { SatyaTagLogo, GovHeader } from '../components/Brand';
 import { useAuth } from '../context/AuthContext';
-import { useDemo } from '../context/DemoContext';
-import { userToOfficer } from '../services/auth';
 
 const VerifyEmailPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { verifyOTP, resendOTP } = useAuth();
-  const { setOfficer } = useDemo();
   const state = location.state as { email?: string; otp?: string; maskedEmail?: string } | null;
   const email = state?.email || '';
   const devOtp = state?.otp || '';
@@ -43,16 +40,20 @@ const VerifyEmailPage: React.FC = () => {
     setLoading(false);
     if (!result.success) { setError(result.error || 'Verification failed'); return; }
     setSuccess(true);
-    const { getCurrentUser } = await import('../services/auth');
-    const user = getCurrentUser();
-    if (user) setOfficer(userToOfficer(user));
-    setTimeout(() => navigate('/dashboard'), 1500);
+    // The account is now active; the officer signs in to continue.
+    setTimeout(() => navigate('/login'), 1800);
   };
 
   const handleResend = async () => {
     setResendLoading(true);
     const result = await resendOTP(email);
     setResendLoading(false);
+    if (result.cooldownSeconds) {
+      setError('A fresh code was recently sent. Please wait before requesting another.');
+      setCountdown(result.cooldownSeconds);
+      return;
+    }
+    if (!result.success) { setError(result.error || 'Could not resend the code'); return; }
     if (result.devOtp) setResendOtp(result.devOtp);
     setCountdown(60);
   };
@@ -70,7 +71,7 @@ const VerifyEmailPage: React.FC = () => {
                 <ShieldCheck className="h-8 w-8 text-compliant-600" />
               </div>
               <h2 className="text-lg font-semibold text-white">Email Verified!</h2>
-              <p className="mt-2 text-sm text-slate-400">Redirecting to your dashboard...</p>
+              <p className="mt-2 text-sm text-slate-400">Redirecting to sign in...</p>
               <div className="mt-4 h-2 w-32 overflow-hidden rounded-full bg-navy-700">
                 <div className="h-full rounded-full bg-govblue-500 animate-pulse" style={{ width: '100%' }} />
               </div>

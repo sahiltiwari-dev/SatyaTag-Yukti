@@ -9,6 +9,7 @@ import { PageHeader } from '../components/common/PageHeader';
 import { Card, Button } from '../components/common/Button';
 import { StatusBadge, DemoTag } from '../components/common/StatusBadge';
 import { useDemo, sleep } from '../context/DemoContext';
+import { useAuth } from '../context/AuthContext';
 
 interface StageDef {
   key: string;
@@ -35,7 +36,8 @@ type Phase = 'idle' | 'running' | 'complete';
 const AnalysePage: React.FC = () => {
   const navigate = useNavigate();
   const { id } = useParams();
-  const { inspection, updateStage, addAudit } = useDemo();
+  const { inspection, updateStage, addAudit, runBackendAnalysis, repositoryOrigin } = useDemo();
+  const { isAuthenticated } = useAuth();
   const [phase, setPhase] = useState<Phase>('idle');
   const [current, setCurrent] = useState(0);
   const [progress, setProgress] = useState(0);
@@ -47,6 +49,22 @@ const AnalysePage: React.FC = () => {
     if (phase !== 'idle' || running) return;
     setRunning(true);
     setPhase('running');
+
+    // Real backend run when the inspection lives in PostgreSQL.
+    if (isAuthenticated && repositoryOrigin === 'backend' && id) {
+      try {
+        await runBackendAnalysis(id);
+        addAudit('Full analysis pipeline completed (backend)', id, 'Success');
+        setPhase('complete');
+        setCurrent(STAGES.length);
+        setProgress(100);
+        setRunning(false);
+        return;
+      } catch (e) {
+        console.error('Backend analysis failed, falling back to demo pipeline.', e);
+      }
+    }
+
     for (let i = 0; i < STAGES.length; i++) {
       setCurrent(i);
       setProgress(((i + 1) / STAGES.length) * 100);

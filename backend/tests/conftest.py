@@ -31,6 +31,10 @@ def clean_tables():
             text(
                 "TRUNCATE TABLE sessions, email_verifications, "
                 "password_reset_tokens, audit_events, user_profiles, "
+                "report_metadata, officer_decisions, findings, "
+                "compliance_checks, listing_analyses, listing_checks, "
+                "applicability_results, classifications, extracted_fields, "
+                "ocr_results, evidence_assets, inspections, "
                 "users RESTART IDENTITY CASCADE"
             )
         )

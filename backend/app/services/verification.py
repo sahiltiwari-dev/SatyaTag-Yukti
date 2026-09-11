@@ -80,6 +80,8 @@ def issue_email_otp(db: Session, user: User) -> dict:
     )
     notifications.send_email(user.email, "Verify your SATYATAG account", text, html)
     db.commit()
+    if settings.email_mode == "console":
+        return {"dev_otp": otp}
     return {}
 
 
@@ -129,14 +131,15 @@ def verify_email_otp(db: Session, email: str, otp: str) -> dict:
     return {"already_verified": False}
 
 
-def issue_password_reset(db: Session, email: str) -> None:
+def issue_password_reset(db: Session, email: str) -> str | None:
     """Creates and emails a password-reset token (fire-and-forget).
 
     Always succeeds silently when the account is absent (anti-enumeration).
+    Returns a dev-only reset URL in console mode, otherwise None.
     """
     user = db.query(User).filter(User.email == email.lower()).first()
     if user is None:
-        return
+        return None
 
     db.query(PasswordResetToken).filter(
         PasswordResetToken.user_id == user.id,
@@ -161,6 +164,9 @@ def issue_password_reset(db: Session, email: str) -> None:
     )
     notifications.send_email(user.email, "Reset your SATYATAG password", text, html)
     db.commit()
+    if settings.email_mode == "console":
+        return reset_url
+    return None
 
 
 def reset_password(

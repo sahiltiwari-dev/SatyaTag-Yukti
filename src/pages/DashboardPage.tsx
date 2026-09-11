@@ -7,7 +7,14 @@ import { useDemo } from '../context/DemoContext';
 
 const DashboardPage: React.FC = () => {
   const navigate = useNavigate();
-  const { inspection, officer, allInspections } = useDemo();
+  const { inspection, officer, allInspections, loadInspection, repositoryOrigin } = useDemo();
+
+  const openInspection = async (id: string) => {
+    if (repositoryOrigin === 'backend') {
+      try { await loadInspection(id); } catch (e) { console.error('Could not open inspection.', e); }
+    }
+    navigate(`/inspection/${id}/result`);
+  };
 
   const compliant = allInspections.filter((i) => i.status === 'Compliant' || i.officerDecision === 'COMPLIANT').length;
   const review = allInspections.filter((i) => i.status === 'Manual Review' || i.status === 'Under Review' || i.officerDecision === 'MANUAL REVIEW').length;
@@ -119,13 +126,13 @@ const DashboardPage: React.FC = () => {
           <Card title="Recent Inspections" subtitle="Latest enforcement activity" actions={<button onClick={() => navigate('/inspections')} className="text-xs font-medium text-govblue-600 hover:text-govblue-700">View All</button>}>
             <div className="space-y-2">
               {allInspections.slice(-6).reverse().map((ri) => (
-                <button key={ri.id} onClick={() => navigate(`/inspection/${ri.inspectionId}/result`)}
+                <button key={ri.id} onClick={() => openInspection(ri.inspectionId)}
                   className="flex w-full items-center gap-3 rounded-button border border-slate-100 px-3.5 py-3 text-left transition-colors hover:bg-slate-50">
                   <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-navy-50 text-xl">📦</span>
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-navy-900">{ri.product.name}</p>
+                    <p className="truncate text-sm font-medium text-navy-900">{ri.product.name || 'Untitled product'}</p>
                     <div className="flex items-center gap-2 text-xs text-slate-500">
-                      <span>{ri.product.category}</span><span>·</span><span>{ri.decisionDate || ri.createdAt}</span>
+                      <span>{ri.product.category || ri.type}</span><span>·</span><span>{ri.decisionDate || ri.createdAt}</span>
                     </div>
                   </div>
                   <StatusBadge status={ri.status} small />

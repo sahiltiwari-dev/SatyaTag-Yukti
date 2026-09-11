@@ -7,14 +7,17 @@ import { PageHeader } from '../components/common/PageHeader';
 import { Card, Button } from '../components/common/Button';
 import { DemoTag } from '../components/common/StatusBadge';
 import { useDemo } from '../context/DemoContext';
+import { useAuth } from '../context/AuthContext';
 import { generateInspectionPdf } from '../utils/report';
+import * as platformApi from '../services/platform';
 
 type GeneratePhase = 'idle' | 'generating' | 'ready';
 
 const InspectionReportPage: React.FC = () => {
   const navigate = useNavigate();
   const { id } = useParams();
-  const { inspection: activeInspection, allInspections, officer, setReportGenerated } = useDemo();
+  const { inspection: activeInspection, allInspections, officer, setReportGenerated, repositoryOrigin } = useDemo();
+  const { isAuthenticated } = useAuth();
   const inspection = allInspections.find((i) => i.inspectionId === id) || activeInspection;
   const [phase, setPhase] = useState<GeneratePhase>(inspection.reportGenerated ? 'ready' : 'idle');
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -33,9 +36,34 @@ const InspectionReportPage: React.FC = () => {
 
   const handleGenerate = async () => {
     setPhase('generating');
+    // Real server-generated PDF (with branding, citations, fingerprint) when the
+    // inspection lives in the backend.
+    if (isAuthenticated && repositoryOrigin === 'backend' && id) {
+      try {
+        await platformApi.generateReport(id);
+        setReportGenerated(true);
+        setPhase('ready');
+        return;
+      } catch (e) {
+        console.error('Backend report failed, falling back to client PDF.', e);
+      }
+    }
     await generateInspectionPdf(inspection, officer);
     setReportGenerated(true);
     setPhase('ready');
+  };
+
+  const handleDownload = async () => {
+    if (isAuthenticated && repositoryOrigin === 'backend' && id) {
+      try {
+        await platformApi.openReportDownload(id);
+        return;
+      } catch (e) {
+        console.error('Backend report download failed.', e);
+      }
+    }
+    if (phase !== 'ready') return;
+    window.print();
   };
 
   const handlePreview = () => {
@@ -88,7 +116,7 @@ const InspectionReportPage: React.FC = () => {
               <p className="text-sm font-medium text-compliant-700">Report generated successfully</p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button onClick={handleGenerate} variant="outline" icon={Download} size="sm">Download PDF</Button>
+              <Button onClick={handleDownload} variant="outline" icon={Download} size="sm">Download PDF</Button>
               <Button onClick={handlePreview} variant="outline" icon={Eye} size="sm">Preview</Button>
               <Button onClick={handlePrint} variant="outline" icon={Printer} size="sm">Print</Button>
               <Button onClick={handleShare} variant="outline" icon={Share2} size="sm">Share</Button>
