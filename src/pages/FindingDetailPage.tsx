@@ -6,11 +6,13 @@ import { Card, Button } from '../components/common/Button';
 import { StatusBadge, DemoTag } from '../components/common/StatusBadge';
 import { Modal } from '../components/common/Modal';
 import { useDemo } from '../context/DemoContext';
+import { useAuth } from '../context/AuthContext';
 
 const FindingDetailPage: React.FC = () => {
   const navigate = useNavigate();
   const { id, findingId } = useParams();
   const { inspection: activeInspection, allInspections, updateFinding } = useDemo();
+  const { isAuthenticated } = useAuth();
   const inspection = allInspections.find((i) => i.inspectionId === id) || activeInspection;
   const finding = inspection.findings.find((f) => f.id === findingId);
   const [notes, setNotes] = useState(finding?.officerNotes || '');
@@ -29,7 +31,7 @@ const FindingDetailPage: React.FC = () => {
   return (
     <div className="space-y-5 animate-[fadeIn_0.3s_ease-out]">
       <PageHeader title="Finding Detail" subtitle={finding.title} icon={finding.type === 'VIOLATION' ? XCircle : AlertTriangle} backTo={`/inspection/${id}/result`} />
-      <DemoTag label="DEMO FINDING" className="w-fit" />
+      {isAuthenticated ? <DemoTag label="LIVE FINDING" className="w-fit" /> : <DemoTag label="DEMO FINDING" className="w-fit" />}
 
       <div className={`rounded-card border-2 p-4 ${finding.type === 'VIOLATION' ? 'border-violation-200 bg-violation-50' : 'border-warning-200 bg-warning-50'}`}>
         <div className="flex items-center gap-3">
@@ -153,7 +155,7 @@ const FindingDetailPage: React.FC = () => {
         <Button variant="outline" onClick={() => navigate(`/inspection/${id}/result`)} fullWidth>Back</Button>
         <Button onClick={() => { handleSave(); navigate(`/inspection/${id}/result`); }} fullWidth size="lg">Save & Return</Button>
       </div>
-      <div className="flex justify-center"><DemoTag label="DEMO FINDING" /></div>
+      <div className="flex justify-center">{isAuthenticated ? <DemoTag label="LIVE FINDING" /> : <DemoTag label="DEMO FINDING" />}</div>
 
       <Modal open={!!zoom} onClose={() => setZoom(null)} title={zoom ? `${zoom.surface} — Evidence Zoom` : ''} wide>
         {zoom && (

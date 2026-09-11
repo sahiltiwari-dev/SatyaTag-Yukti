@@ -6,6 +6,7 @@ import { Card, Button } from '../components/common/Button';
 import { Modal } from '../components/common/Modal';
 import { DemoTag } from '../components/common/StatusBadge';
 import { useDemo, sleep } from '../context/DemoContext';
+import { useAuth } from '../context/AuthContext';
 
 type FinalDecision = 'COMPLIANT' | 'MANUAL REVIEW' | 'NON-COMPLIANT';
 
@@ -28,6 +29,7 @@ const OfficerReviewPage: React.FC = () => {
   const navigate = useNavigate();
   const { id } = useParams();
   const { inspection, officer, setFinalDecision } = useDemo();
+  const { isAuthenticated } = useAuth();
   const [decisionModalOpen, setDecisionModalOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [inspectorDecision, setInspectorDecision] = useState<FinalDecision | ''>(inspection.officerDecision !== 'Pending' ? inspection.officerDecision as FinalDecision : '');
@@ -47,7 +49,7 @@ const OfficerReviewPage: React.FC = () => {
   return (
     <div className="space-y-5 animate-[fadeIn_0.3s_ease-out]">
       <PageHeader title="Officer Review" subtitle="Review findings and make the final decision" backTo={`/inspection/${id}/result`} />
-      <DemoTag label="DEMO DATA" className="w-fit" />
+      {isAuthenticated ? <DemoTag label="LIVE DATA" className="w-fit" /> : <DemoTag label="DEMO DATA" className="w-fit" />}
 
       <Card>
         <div className="flex items-center gap-3">

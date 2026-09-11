@@ -86,7 +86,7 @@ const InspectionReportPage: React.FC = () => {
   return (
     <div className="space-y-5 animate-[fadeIn_0.3s_ease-out]">
       <PageHeader title="Inspection Report" subtitle={inspection.inspectionId} backTo={`/inspection/${id}/review`} />
-      <DemoTag label="DEMO REPORT" className="w-fit" />
+      {isAuthenticated ? <DemoTag label="LIVE REPORT" className="w-fit" /> : <DemoTag label="DEMO REPORT" className="w-fit" />}
 
       {/* Generation / download UX */}
       <Card>

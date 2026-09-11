@@ -5,11 +5,13 @@ import { PageHeader } from '../components/common/PageHeader';
 import { Card, Button } from '../components/common/Button';
 import { StatusBadge, DemoTagSubtle } from '../components/common/StatusBadge';
 import { useDemo } from '../context/DemoContext';
+import { useAuth } from '../context/AuthContext';
 
 const ComplianceResultPage: React.FC = () => {
   const navigate = useNavigate();
   const { id } = useParams();
   const { inspection: activeInspection, allInspections } = useDemo();
+  const { isAuthenticated } = useAuth();
   const inspection = allInspections.find((i) => i.inspectionId === id) || activeInspection;
   const isSeeded = allInspections.some((i) => i.inspectionId === id);
   const [fingerprintOpen, setFingerprintOpen] = useState(false);
@@ -64,7 +66,7 @@ const ComplianceResultPage: React.FC = () => {
           </div>
         </div>
       </Card>
-      <DemoTagSubtle label="DEMO DATA" />
+      {isAuthenticated ? <DemoTagSubtle label="LIVE DATA" /> : <DemoTagSubtle label="DEMO DATA" />}
 
       {/* Officer decision summary */}
       <Card title="Officer Decision" subtitle="Single source of truth — shared across Result, Report and Repository">

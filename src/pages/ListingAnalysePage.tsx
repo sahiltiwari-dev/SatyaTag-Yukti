@@ -192,7 +192,7 @@ const ListingAnalysePage: React.FC = () => {
           <Button onClick={handleResult} icon={ChevronRight} fullWidth size="lg">
             View Compliance Result
           </Button>
-          <DemoTag label="DEMO LISTING EXTRACTION" className="mx-auto flex w-fit" />
+          {isAuthenticated ? <DemoTag label="LIVE LISTING EXTRACTION" className="mx-auto flex w-fit" /> : <DemoTag label="DEMO LISTING EXTRACTION" className="mx-auto flex w-fit" />}
         </>
       )}
     </div>

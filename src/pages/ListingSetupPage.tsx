@@ -6,6 +6,7 @@ import { Stepper } from '../components/common/Stepper';
 import { Card, Button } from '../components/common/Button';
 import { DemoTag } from '../components/common/StatusBadge';
 import { useDemo } from '../context/DemoContext';
+import { useAuth } from '../context/AuthContext';
 
 const DEMO_LISTINGS = [
   { title: 'MWare — Maggi Noodles 70g', url: 'https://mware.in/p/maggi-2-minute-noodles-70g', danger: false },
@@ -18,6 +19,7 @@ const ListingSetupPage: React.FC = () => {
   const navigate = useNavigate();
   const { id } = useParams();
   const { updateStage, addAudit } = useDemo();
+  const { isAuthenticated } = useAuth();
   const [url, setUrl] = useState('');
   const [error, setError] = useState<string | null>(null);
 
@@ -88,7 +90,7 @@ const ListingSetupPage: React.FC = () => {
         </p>
       </div>
 
-      <DemoTag label="DEMO LISTING FLOW" className="mx-auto flex w-fit" />
+      {isAuthenticated ? <DemoTag label="LIVE LISTING FLOW" className="mx-auto flex w-fit" /> : <DemoTag label="DEMO LISTING FLOW" className="mx-auto flex w-fit" />}
     </div>
   );
 };

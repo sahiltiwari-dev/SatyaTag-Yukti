@@ -1,13 +1,22 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Camera, Search, BarChart3, BookOpen, ChevronRight, Clock, AlertTriangle, CheckCircle2, XCircle, MapPin, ShieldCheck, TrendingUp } from 'lucide-react';
 import { Card } from '../components/common/Button';
 import { StatusBadge, DemoTagSubtle } from '../components/common/StatusBadge';
 import { useDemo } from '../context/DemoContext';
+import { useAuth } from '../context/AuthContext';
+import * as platform from '../services/platform';
 
 const DashboardPage: React.FC = () => {
   const navigate = useNavigate();
   const { inspection, officer, allInspections, loadInspection, repositoryOrigin } = useDemo();
+  const { isAuthenticated } = useAuth();
+  const [backendStats, setBackendStats] = useState<platform.DashboardStats | null>(null);
+
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    platform.getDashboardStats().then(setBackendStats).catch(() => setBackendStats(null));
+  }, [isAuthenticated]);
 
   const openInspection = async (id: string) => {
     if (repositoryOrigin === 'backend') {
@@ -16,15 +25,19 @@ const DashboardPage: React.FC = () => {
     navigate(`/inspection/${id}/result`);
   };
 
-  const compliant = allInspections.filter((i) => i.status === 'Compliant' || i.officerDecision === 'COMPLIANT').length;
-  const review = allInspections.filter((i) => i.status === 'Manual Review' || i.status === 'Under Review' || i.officerDecision === 'MANUAL REVIEW').length;
-  const nonCompliant = allInspections.filter((i) => i.status === 'Non-Compliant' || i.officerDecision === 'NON-COMPLIANT').length;
-  const total = allInspections.length || 1;
+  const compliant = backendStats?.compliant ?? allInspections.filter((i) => i.status === 'Compliant' || i.officerDecision === 'COMPLIANT').length;
+  const review = backendStats?.manual_review ?? allInspections.filter((i) => i.status === 'Manual Review' || i.status === 'Under Review' || i.officerDecision === 'MANUAL REVIEW').length;
+  const nonCompliant = backendStats?.non_compliant ?? allInspections.filter((i) => i.status === 'Non-Compliant' || i.officerDecision === 'NON-COMPLIANT').length;
+  const total = backendStats?.total_inspections ?? (allInspections.length || 1);
   const pctOf = (n: number) => Math.round((n / total) * 100);
 
+  const trendData = backendStats?.trend?.data?.length
+    ? backendStats.trend.data
+    : [{ date: '', count: 0 }];
+
   const stats = [
-    { label: 'Total Inspections', value: allInspections.length, sub: 'All records', icon: Clock, color: 'text-govblue-600', bg: 'bg-govblue-50' },
-    { label: 'Compliant', value: compliant, sub: `${pctOf(compliant)}%`, icon: CheckCircle2, color: 'text-compliant-600', bg: 'bg-compliant-50' },
+    { label: 'Total Inspections', value: total, sub: 'All records', icon: Clock, color: 'text-govblue-600', bg: 'bg-govblue-50' },
+    { label: 'Compliant', value: compliant, sub: backendStats ? `${backendStats.compliance_rate}% rate` : `${pctOf(compliant)}%`, icon: CheckCircle2, color: 'text-compliant-600', bg: 'bg-compliant-50' },
     { label: 'Manual Review', value: review, sub: `${pctOf(review)}%`, icon: AlertTriangle, color: 'text-warning-600', bg: 'bg-warning-50' },
     { label: 'Non-Compliant', value: nonCompliant, sub: `${pctOf(nonCompliant)}%`, icon: XCircle, color: 'text-violation-600', bg: 'bg-violation-50' },
   ];
@@ -98,7 +111,7 @@ const DashboardPage: React.FC = () => {
 
       <div className="flex items-center justify-between">
         <h2 className="text-sm font-semibold text-navy-900">This Month</h2>
-        <DemoTagSubtle />
+        {isAuthenticated ? <DemoTagSubtle label="LIVE REPOSITORY DATA" /> : <DemoTagSubtle />}
       </div>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         {stats.map((s) => (
@@ -155,14 +168,25 @@ const DashboardPage: React.FC = () => {
             </div>
           </div>
 
-          <Card title="Trends" subtitle="Inspections over last 7 months" icon={TrendingUp}>
+          <Card title="Trends" subtitle={backendStats ? `Inspections over last ${backendStats.trend.days} days` : 'Demo repository trend'} icon={TrendingUp}>
             <div className="flex items-end justify-between gap-1" style={{ height: '80px' }}>
-              {[14, 19, 24, 22, 27, 31, 26].map((v, i) => (
-                <div key={i} className="flex flex-1 flex-col items-center gap-1">
-                  <div className="w-full rounded-t bg-govblue-500" style={{ height: `${(v / 31) * 100}%` }} />
-                  <span className="text-[8px] text-slate-400">{['J', 'F', 'M', 'A', 'M', 'J', 'J'][i]}</span>
-                </div>
-              ))}
+              {trendData.length === 0 || (trendData.length === 1 && !trendData[0].date) ? (
+                <p className="flex h-20 w-full items-center justify-center text-xs text-slate-400">
+                  No recent inspection activity recorded.
+                </p>
+              ) : (
+                trendData.slice(-10).map((t, i) => {
+                  const months = ['J', 'F', 'M', 'A', 'M', 'J', 'J', 'A', 'S', 'O', 'N', 'D'];
+                  const max = Math.max(...trendData.map((d) => d.count), 1);
+                  const label = t.date ? `${months[(new Date(t.date)).getMonth()]}/${String(new Date(t.date).getDate()).padStart(2, '0')}` : '';
+                  return (
+                    <div key={i} className="flex flex-1 flex-col items-center gap-1" title={`${t.date}: ${t.count}`}>
+                      <div className="w-full rounded-t bg-govblue-500" style={{ height: `${(t.count / max) * 100}%` }} />
+                      <span className="text-[8px] text-slate-400">{label}</span>
+                    </div>
+                  );
+                })
+              )}
             </div>
           </Card>
         </div>

@@ -150,6 +150,36 @@ export const DemoProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const updateFinding = useCallback(
     (findingId: string, decision: Finding['officerDecision'], notes: string) => {
+      // For backend findings, persist the officer decision through the API.
+      if (authedRef.current && findingId && !findingId.startsWith('FND-') && !findingId.startsWith('fnd-')) {
+        const cur = inspectionRef.current;
+        const finding = cur.findings.find((f) => f.id === findingId);
+        if (finding) {
+          const decisionMap: Record<string, string> = {
+            'Confirmed': 'Confirmed',
+            'Needs Review': 'Needs Review',
+            'Not Established': 'Not Established',
+            'Pending': 'Pending',
+          };
+          analysisApi.setFindingDecision(cur.inspectionId, findingId, decisionMap[decision] || decision, notes)
+            .then(() => {
+              setInspection((prev) => ({
+                ...prev,
+                findings: prev.findings.map((f) =>
+                  f.id === findingId ? {
+                    ...f,
+                    officerDecision: decision,
+                    officerNotes: notes,
+                    status: (decision === 'Confirmed' ? 'Potential Violation'
+                      : decision === 'Not Established' ? 'Resolved' : 'Under Review') as Finding['status'],
+                  } : f,
+                ),
+              }));
+            })
+            .catch((e) => console.error('Could not persist finding decision.', e));
+          return;
+        }
+      }
       setInspection((prev) => ({
         ...prev,
         findings: prev.findings.map((f) =>

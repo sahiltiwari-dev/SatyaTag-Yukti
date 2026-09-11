@@ -1,35 +1,55 @@
-﻿import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { BarChart3, TrendingUp, PieChart as PieIcon, MapPin, AlertTriangle } from 'lucide-react';
 import { PageHeader } from '../components/common/PageHeader';
 import { Card } from '../components/common/Button';
 import { DemoTag } from '../components/common/StatusBadge';
 import { useDemo } from '../context/DemoContext';
+import { useAuth } from '../context/AuthContext';
+import * as platform from '../services/platform';
 
 const dateRanges = [
-  { key: '1m', label: '1 Month' },
-  { key: '3m', label: '3 Months' },
-  { key: '6m', label: '6 Months' },
-  { key: '1y', label: '1 Year' },
+  { key: '1m', label: '1 Month', days: 30 },
+  { key: '3m', label: '3 Months', days: 90 },
+  { key: '6m', label: '6 Months', days: 180 },
+  { key: '1y', label: '1 Year', days: 365 },
 ];
 
 const AnalyticsPage: React.FC = () => {
   const [dateRange, setDateRange] = useState('6m');
   const { allInspections } = useDemo();
+  const { isAuthenticated } = useAuth();
+  const [backendData, setBackendData] = useState<platform.AnalyticsOverview | null>(null);
 
-  const compliant = allInspections.filter((i) => i.officerDecision === 'COMPLIANT').length;
-  const review = allInspections.filter((i) => i.officerDecision === 'MANUAL REVIEW' || i.officerDecision === 'Pending').length;
-  const nonCompliant = allInspections.filter((i) => i.officerDecision === 'NON-COMPLIANT').length;
-  const total = allInspections.length || 1;
-  const complianceRate = Math.round((compliant / total) * 100);
+  const days = dateRanges.find((r) => r.key === dateRange)?.days || 180;
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    platform.getAnalytics(days).then(setBackendData).catch(() => setBackendData(null));
+  }, [isAuthenticated, days]);
+
+  const compliant = backendData?.compliant ?? allInspections.filter((i) => i.officerDecision === 'COMPLIANT').length;
+  const review = backendData?.manual_reviews ?? allInspections.filter((i) => i.officerDecision === 'MANUAL REVIEW' || i.officerDecision === 'Pending').length;
+  const nonCompliant = backendData?.potential_violations ?? allInspections.filter((i) => i.officerDecision === 'NON-COMPLIANT').length;
+  const total = backendData?.total_inspections ?? (allInspections.length || 1);
+  const complianceRate = backendData?.compliance_rate ?? Math.round((compliant / total) * 100);
   const pct = (n: number) => Math.round((n / total) * 100);
 
   const monthLabels = ['Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep'];
   const trendData = monthLabels.map((m) => allInspections.filter((i) => i.createdAt.includes(m)).length);
   const trendMax = Math.max(...trendData, 1);
 
+  const statusByDecision = (label: string) =>
+    backendData?.status_distribution?.find((s) => s.label === label)?.value ?? 0;
+  const statusData = [
+    { label: 'Compliant', value: backendData ? statusByDecision('COMPLIANT') || Math.round((compliant / total) * 100) : pct(compliant), color: 'bg-compliant-500' },
+    { label: 'Manual Review', value: backendData ? statusByDecision('MANUAL REVIEW') || statusByDecision('Manual Review') || Math.round((review / total) * 100) : pct(review), color: 'bg-warning-500' },
+    { label: 'Non-Compliant', value: backendData ? statusByDecision('NON-COMPLIANT') || Math.round((nonCompliant / total) * 100) : pct(nonCompliant), color: 'bg-violation-500' },
+  ];
+
   const catCounts = new Map<string, number>();
   allInspections.forEach((i) => catCounts.set(i.product.category, (catCounts.get(i.product.category) || 0) + 1));
-  const categoryData = [...catCounts.entries()].map(([label, value]) => ({ label, value: Math.round((value / total) * 100) }));
+  const categoryData = backendData?.category_distribution?.length
+    ? backendData.category_distribution.slice(0, 5)
+    : [...catCounts.entries()].map(([label, value]) => ({ label, value: Math.round((value / total) * 100) }));
 
   const findingCounts = new Map<string, number>();
   allInspections.forEach((i) => i.findings.forEach((f) => findingCounts.set(f.title, (findingCounts.get(f.title) || 0) + 1)));
@@ -48,84 +68,67 @@ const AnalyticsPage: React.FC = () => {
   });
   const locationData = [...locCounts.entries()].map(([location, v]) => ({ location, ...v }));
 
-  const statusData = [
-    { label: 'Compliant', value: pct(compliant), color: 'bg-compliant-500' },
-    { label: 'Manual Review', value: pct(review), color: 'bg-warning-500' },
-    { label: 'Non-Compliant', value: pct(nonCompliant), color: 'bg-violation-500' },
-  ];
-
   return (
     <div className="space-y-5 animate-[fadeIn_0.3s_ease-out]">
       <PageHeader title="Analytics Dashboard" subtitle="Compliance insights and trends" icon={BarChart3} />
-      <DemoTag label="DEMO ANALYTICS" className="w-fit" />
-      <div className="flex gap-1.5">
-        {dateRanges.map((r) => (
-          <button key={r.key} onClick={() => setDateRange(r.key)}
-            className={`rounded-button px-3 py-1.5 text-xs font-medium transition-colors ${dateRange === r.key ? 'bg-govblue-600 text-white' : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}>
-            {r.label}
-          </button>
-        ))}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex gap-1.5">
+          {dateRanges.map((r) => (
+            <button key={r.key} onClick={() => setDateRange(r.key)}
+              className={`rounded-button px-3 py-1.5 text-xs font-medium transition-colors ${dateRange === r.key ? 'bg-govblue-600 text-white' : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}>
+              {r.label}
+            </button>
+          ))}
+        </div>
+        {backendData ? (
+          <DemoTag label="LIVE DATABASE DATA" className="w-fit ml-auto" />
+        ) : (
+          <DemoTag label="DEMO ANALYTICS" className="w-fit ml-auto" />
+        )}
       </div>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <Kpi label="Total Inspections" value={`${allInspections.length}`} sub="All records" tone="text-navy-900" />
+        <Kpi label="Total Inspections" value={`${total}`} tone="text-navy-900" />
         <Kpi label="Compliance Rate" value={`${complianceRate}%`} tone="text-compliant-600" />
-        <Kpi label="Manual Reviews" value={`${review}`} sub={`${pct(review)}%`} tone="text-warning-600" />
-        <Kpi label="Potential Violations" value={`${nonCompliant}`} sub={`${pct(nonCompliant)}%`} tone="text-violation-600" />
+        <Kpi label="Manual Reviews" value={`${review}`} tone="text-warning-600" />
+        <Kpi label="Potential Violations" value={`${nonCompliant}`} tone="text-violation-600" />
       </div>
-      <Card title="Status Distribution" subtitle="All inspections">
-        <div className="space-y-3">
-          {statusData.map((s) => (
-            <div key={s.label}>
-              <div className="mb-1 flex justify-between text-xs">
-                <span className="font-medium text-navy-900">{s.label}</span>
-                <span className="text-slate-500">{s.value}%</span>
-              </div>
-              <div className="h-2.5 w-full rounded-full bg-slate-100">
-                <div className={`h-2.5 rounded-full ${s.color} transition-all duration-500`} style={{ width: `${s.value}%` }} />
-              </div>
-            </div>
-          ))}
-        </div>
-      </Card>
-      <Card title="Inspection Trend" subtitle="Inspections per month">
-        <div className="flex h-32 items-end gap-3">
-          {trendData.map((v, i) => (
-            <div key={i} className="flex flex-1 flex-col items-center gap-1">
-              <div className="flex w-full flex-1 items-end">
-                <div className="w-full rounded-t-md bg-govblue-500 transition-all duration-500 hover:bg-govblue-600" style={{ height: `${(v / trendMax) * 100}%` }} />
-              </div>
-              <span className="text-[9px] text-slate-500">{monthLabels[i]}</span>
-            </div>
-          ))}
-        </div>
-      </Card>
-      <Card title="Category Breakdown" subtitle="Inspections by product category" icon={PieIcon}>
-        <div className="flex items-center gap-4">
-          <div className="relative h-32 w-32 shrink-0">
-            <svg viewBox="0 0 36 36" className="h-32 w-32 -rotate-90">
-              <circle cx="18" cy="18" r="15.9" fill="none" stroke="#e2e8f0" strokeWidth="6" />
-              {categoryData.slice(0, 5).map((c, idx) => {
-                const colors = ['#1d4ed8', '#10b981', '#f59e0b', '#94a3b8', '#ef4444'];
-                const offset = categoryData.slice(0, idx).reduce((sum, prev) => sum + prev.value, 0);
-                return c.value > 0 ? (
-                  <circle key={c.label} cx="18" cy="18" r="15.9" fill="none" stroke={colors[idx % colors.length]} strokeWidth="6" strokeDasharray={`${c.value} 100`} strokeDashoffset={-offset} />
-                ) : null;
-              })}
-            </svg>
-            <div className="absolute inset-0 flex items-center justify-center">
-              <span className="text-sm font-bold text-navy-900">{allInspections.length}</span>
-            </div>
-          </div>
-          <div className="flex-1 space-y-1.5">
-            {categoryData.slice(0, 5).map((c) => (
-              <div key={c.label} className="flex items-center justify-between text-xs">
-                <span className="text-slate-600">{c.label}</span>
-                <span className="font-medium text-navy-900">{c.value}%</span>
+<div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <Card title="Compliance Status" subtitle="Distribution across determinations" icon={PieIcon}>
+          <div className="space-y-3">
+            {statusData.map((s) => (
+              <div key={s.label}>
+                <div className="mb-1 flex items-center justify-between text-xs">
+                  <span className="font-medium text-navy-900">{s.label}</span>
+                  <span className="text-slate-500">{s.value}%</span>
+                </div>
+                <div className="h-2 w-full overflow-hidden rounded-full bg-slate-100">
+                  <div className={`h-full rounded-full ${s.color}`} style={{ width: `${Math.min(s.value, 100)}%` }} />
+                </div>
               </div>
             ))}
           </div>
-        </div>
-      </Card>
+        </Card>
+        <Card title="Inspections Over Time" icon={TrendingUp}>
+          <div className="flex items-end justify-between gap-1" style={{ height: '140px' }}>
+            {monthLabels.map((m, i) => (
+              <div key={m} title={`${m}: ${trendData[i]}`} className="flex flex-1 flex-col items-center gap-1">
+                <div className="w-full rounded-t bg-govblue-500" style={{ height: `${Math.max((trendData[i] / trendMax) * 100, 4)}%` }} />
+                <span className="text-[8px] text-slate-400">{m.slice(0, 1)}</span>
+              </div>
+            ))}
+          </div>
+        </Card>
+        <Card title="Category Distribution" icon={BarChart3}>
+          <div className="space-y-1.5">
+            {categoryData.slice(0, 5).map((c) => (
+              <div key={c.label} className="flex items-center justify-between text-xs">
+                <span className="text-slate-600">{c.label}</span>
+                <span className="font-medium text-navy-900">{c.value}{backendData ? '%' : ''}</span>
+              </div>
+            ))}
+          </div>
+        </Card>
+      </div>
       <Card title="Top Findings" subtitle="Most common compliance issues" icon={AlertTriangle}>
         <div className="space-y-2">
           {topFindings.length === 0 && <p className="text-xs text-slate-500">No findings recorded yet.</p>}
@@ -143,12 +146,13 @@ const AnalyticsPage: React.FC = () => {
           ))}
         </div>
       </Card>
-      <Card title="Location Performance" subtitle="Violations across locations" icon={MapPin}>
+<Card title="Location Performance" subtitle="Violations across locations" icon={MapPin}>
         <div className="space-y-2">
+          {locationData.length === 0 && <p className="text-xs text-slate-500">No location data recorded.</p>}
           {locationData.map((l) => (
             <div key={l.location} className="flex items-center justify-between">
-              <span className="w-24 text-xs text-navy-900">{l.location}</span>
-              <div className="flex-1">
+              <span className="w-24 truncate text-xs text-navy-900">{l.location}</span>
+              <div className="flex-1 px-2">
                 <div className="flex gap-0.5">
                   {Array.from({ length: Math.max(l.inspections, 1) }).map((_, i) => (
                     <div key={i} className={`h-2 flex-1 rounded-sm ${i < l.violations ? 'bg-violation-400' : 'bg-compliant-300'}`} />
@@ -166,18 +170,17 @@ const AnalyticsPage: React.FC = () => {
       <Card>
         <div className="flex items-center gap-2 text-xs text-slate-500">
           <TrendingUp className="h-4 w-4 text-compliant-600" />
-          <span>Based on <span className="font-semibold text-navy-900">{allInspections.length}</span> inspection records in the demo repository.</span>
+          <span>Based on <span className="font-semibold text-navy-900">{total}</span> inspection records{backendData ? ' in the SATYATAG database' : ' in the demo repository'}. Analytics are informational.</span>
         </div>
       </Card>
     </div>
   );
 };
 
-const Kpi: React.FC<{ label: string; value: string; sub?: string; tone: string }> = ({ label, value, sub, tone }) => (
+const Kpi: React.FC<{ label: string; value: string; tone: string }> = ({ label, value, tone }) => (
   <Card padded className="text-center">
     <p className={`text-2xl font-bold ${tone}`}>{value}</p>
     <p className="text-[11px] text-slate-500">{label}</p>
-    {sub && <p className="text-[10px] text-slate-400">{sub}</p>}
   </Card>
 );
 

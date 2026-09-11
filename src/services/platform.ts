@@ -33,10 +33,13 @@ export interface AnalyticsOverview {
   category_distribution: { label: string; value: number }[];
   mode_distribution: { label: string; value: number }[];
   recent: Record<string, unknown>[];
+  // Optional computed convenience fields (backend may or may not include them).
+  compliant?: number;
 }
 
-export function getAnalytics(): Promise<AnalyticsOverview> {
-  return apiRequest<AnalyticsOverview>('/api/analytics/overview');
+export function getAnalytics(days?: number): Promise<AnalyticsOverview> {
+  const q = days ? `?days=${days}` : '';
+  return apiRequest<AnalyticsOverview>(`/api/analytics/overview${q}`);
 }
 
 // --- Notifications -----------------------------------------------------

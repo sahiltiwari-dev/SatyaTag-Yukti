@@ -61,14 +61,18 @@ def _field_for(rule: LegalRule, extracted: dict) -> Optional[str]:
     """Map a rule to a deterministic extracted field key."""
     key = (rule.category or "").lower()
     title = (rule.title or "").lower()
-    haystack = key + " " + title
+    description = (rule.description or "").lower()
+    haystack = f"{key} {title} {description}"
     pairs = [
+        ("nutritional_info", ["nutritional information", "nutrition per", "nutrition"]),
         ("net_quantity", ["net quantity"]),
         ("mrp", ["mrp", "maximum retail"]),
         ("manufacturer", ["manufacturer", "name and address"]),
         ("country_of_origin", ["country of origin", "origin"]),
         ("consumer_care", ["consumer care", "toll free", "email address"]),
-        ("best_before", ["best before", "expiry", "use by"]),
+        # Note: the Rules use the hyphenated "best-before" form, so both
+        # spellings are matched.
+        ("best_before", ["best before", "best-before", "expiry", "use by"]),
         ("date_of_manufacture", ["date of manufacture", "manufacture"]),
         ("batch_no", ["batch", "lot"]),
         ("common_name", ["common name", "generic name"]),
@@ -88,7 +92,7 @@ def _field_for(rule: LegalRule, extracted: dict) -> Optional[str]:
 
 def _missing_issue(rule_text: str, extracted: dict) -> Optional[str]:
     checks = [
-        ("consumer", "consumer care", "consumer care"),
+        ("consumer", "consumer_care", "consumer care"),
         ("net quantity", "net_quantity", "net quantity"),
         ("mrp", "mrp", "maximum retail price (MRP)"),
         ("manufacturer", "manufacturer", "manufacturer details"),
@@ -123,44 +127,148 @@ def _mrp_sane(value: str) -> bool:
         return False
 
 
+_UNCERTAIN_VALUES = frozenset({
+    "", "not verified from image", "not found on label",
+    "not verified", "n/a", "na", "unknown", "—",
+})
+
+
+def _rule_applicable(rule: LegalRule, extracted: dict) -> bool:
+    """Determine whether a rule applies to the product being inspected.
+
+    NOT_APPLICABLE should only be returned when the rule genuinely does not
+    apply to this product type (e.g. FSSAI licence for a non-food product,
+    country-of-origin for a domestically-manufactured product, nutritional
+    information for a non-food product).
+    """
+    rule_text = ((rule.title or "") + " " + (rule.description or "")).lower()
+    cat = (rule.category or "").lower()
+
+    source = (extracted.get("country_of_origin") or "").strip().lower()
+    product_type = (extracted.get("product_type") or "").lower()
+    common_name = (extracted.get("common_name") or "").lower()
+    food_categories = {
+        "edible oil", "snacks", "confectionery", "dairy", "food",
+        "beverage", "noodles", "biscuit", "chips", "soft drink",
+        "juice", "tea", "coffee", "namkeen",
+    }
+    is_food = any(fc in product_type for fc in food_categories) or any(
+        fc in common_name for fc in food_categories
+    )
+
+    # Country of origin declaration — mandatory for imported products only
+    # (Legal Metrology (Packaged Commodities) Rules, 2011 Schedule,
+    # "Country of origin or manufacture or packing").
+    if "country of origin" in rule_text or "country of origin" in cat:
+        if source in {"", "india", "made in india"}:
+            return False  # domestically sourced — CoO rule not applicable
+
+    # FSSAI licence / registration number — mandatory for food commodities only.
+    if "fssai" in rule_text or "fssai" in cat:
+        if not is_food:
+            return False
+
+    # Nutritional information — required under FSSAI labelling for food items.
+    if "nutritional information" in rule_text or "nutrition" in cat:
+        if not is_food:
+            return False
+
+    return True
+
+
 def _eval_rule(rule: LegalRule, extracted: dict, field_lookup: dict) -> tuple:
-    """Evaluate one rule deterministically. Returns (outcome, severity, message, field_id)."""
+    """Evaluate one rule deterministically. Returns (outcome, severity, message, field_id).
+
+    Outcome semantics:
+      PASS            — rule applies, data present and valid
+      REVIEW          — rule applies but data is missing or uncertain
+      VIOLATION       — rule applies, data present but invalid / contradicts the rule,
+                        or a MAJOR mandatory declaration is absent from the label
+      NOT_APPLICABLE  — rule does not apply to this product type
+    """
     title = rule.title
     rule_text = (title + " " + (rule.description or "")).lower()
-    field_key = _field_for(rule, extracted)
-    value = _or(extracted.get(field_key), "")
-    field_id = field_lookup.get(field_key)
+    rule_severity = (rule.severity.value if rule.severity else "INFO").upper()
+    rule_category = (rule.category or "").lower()
 
-    if not value or value == "Not found on label":
+    # 1. Check applicability first — NOT_APPLICABLE before REVIEW.
+    if not _rule_applicable(rule, extracted):
         return (
             CheckOutcome.NOT_APPLICABLE, Severity.LOW,
-            f"{title} — data not available on the captured label; officer review recommended.",
+            f"{title} — this rule is not applicable to the product under inspection.",
+            None,
+        )
+
+    # 2. Map the rule to an extracted-field key.
+    field_key = _field_for(rule, extracted)
+    value_raw = (extracted.get(field_key) or "").strip()
+    field_id = field_lookup.get(field_key)
+
+    # 3a. Absent mandatory declaration → VIOLATION. The Schedule to the
+    #     Packaged Commodities Rules 2011 makes these declarations mandatory on
+    #     every retail package; their absence is prima-facie non-compliance.
+    #     MINOR / informational rules are treated as REVIEW instead, since the
+    #     requirement may be conditional or the data may be non-capturable.
+    if not value_raw:
+        if rule_severity == "MAJOR":
+            return (
+                CheckOutcome.VIOLATION, Severity.HIGH,
+                f"{title} — {field_key.replace('_', ' ')} is a mandatory declaration "
+                f"required on the label but was not found on the captured package.",
+                field_id,
+            )
+        return (
+            CheckOutcome.REVIEW, Severity.MEDIUM,
+            f"{title} — {field_key.replace('_', ' ')} could not be verified from the "
+            f"captured label evidence. Officer review required.",
             field_id,
         )
 
-    missing = _missing_issue(rule_text, extracted)
+    # 3b. Uncertain / partially-verified data → REVIEW.
+    if value_raw.lower() in _UNCERTAIN_VALUES:
+        return (
+            CheckOutcome.REVIEW, Severity.MEDIUM,
+            f"{title} — '{field_key.replace('_', ' ')}' could not be verified "
+            f"({value_raw}). Officer review of the physical package required.",
+            field_id,
+        )
+
+    # 4. Missing sub-requirement → VIOLATION. Definitions / informational rules
+    #    do not carry declaration sub-requirements.
+    missing = (
+        None
+        if rule_category == "definitions" or rule_severity == "INFO"
+        else _missing_issue(rule_text, extracted)
+    )
     if missing:
         return (CheckOutcome.VIOLATION, Severity.HIGH, missing, field_id)
 
+    # 5. Format / date checks → VIOLATION.
     check_type = (rule.check_type.value if rule.check_type else "PRESENCE").upper()
-    if check_type == "FORMAT" or "best before" in rule_text or "expiry" in rule_text:
-        if not _parses_date(value):
+    if check_type == "FORMAT" or "best before" in rule_text or "best-before" in rule_text or "expiry" in rule_text:
+        if not _parses_date(value_raw):
             return (
                 CheckOutcome.VIOLATION, Severity.HIGH,
-                f"{title} — '{value}' is not in a recognised readable date format (e.g. MM/YYYY or DD/MM/YYYY).",
+                f"{title} — '{value_raw}' is not in a recognised date format "
+                f"(e.g. MM/YYYY or DD/MM/YYYY).",
                 field_id,
             )
+
+    # 6. Consistency / MRP checks.
     if check_type == "CONSISTENCY" or "declare" in rule_text or "match" in rule_text:
-        mrp = _or(extracted.get("mrp"), "")
+        mrp = (extracted.get("mrp") or "").strip()
         if mrp and not _mrp_sane(mrp):
             return (
                 CheckOutcome.REVIEW, Severity.MEDIUM,
-                f"{title} — maximum retail price '{mrp}' could not be verified as a valid price. Review manually.",
+                f"{title} — maximum retail price '{mrp}' could not be verified as "
+                f"a valid price. Review manually.",
                 field_id,
             )
+
+    # 7. All checks passed.
     return (
         CheckOutcome.PASS, Severity.LOW,
-        f"{title} — '{value}' declared and found on the label.",
+        f"{title} — '{value_raw}' declared and found on the label.",
         field_id,
     )
 
@@ -195,6 +303,13 @@ def _run_compliance(db: Session, inspection: Inspection, user: User) -> dict:
         "consumer_care": inspection.consumer_care, "common_name": inspection.common_name,
         "date_of_manufacture": inspection.date_of_manufacture,
         "best_before": inspection.best_before,
+        # Product-type context used by applicability decisions (e.g. FSSAI rule
+        # applies to food only). Derived from the persisted classification.
+        "product_type": (
+            inspection.classification.product_type
+            if inspection.classification and inspection.classification.product_type
+            else inspection.category
+        ) or "Packaged Commodity",
     }
     for k, v in fallback.items():
         if not extracted.get(k) and v:

@@ -22,6 +22,10 @@ import AnalyticsPage from './pages/AnalyticsPage';
 import RuleLibraryPage from './pages/RuleLibraryPage';
 import RuleDetailPage from './pages/RuleDetailPage';
 import ProfilePage from './pages/ProfilePage';
+import SettingsPage from './pages/SettingsPage';
+import NotificationsPage from './pages/NotificationsPage';
+import AuditPage from './pages/AuditPage';
+import NotFoundPage from './pages/NotFoundPage';
 
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { isAuthenticated, isLoading } = useAuth();
@@ -73,7 +77,10 @@ const AppRoutes: React.FC = () => {
       <Route path="/rules" element={<ProtectedRoute><RuleLibraryPage /></ProtectedRoute>} />
       <Route path="/rules/:ruleId" element={<ProtectedRoute><RuleDetailPage /></ProtectedRoute>} />
       <Route path="/profile" element={<ProtectedRoute><ProfilePage /></ProtectedRoute>} />
-      <Route path="*" element={<Navigate to={isAuthenticated ? "/dashboard" : "/login"} replace />} />
+      <Route path="/settings" element={<ProtectedRoute><SettingsPage /></ProtectedRoute>} />
+      <Route path="/notifications" element={<ProtectedRoute><NotificationsPage /></ProtectedRoute>} />
+      <Route path="/audit" element={<ProtectedRoute><AuditPage /></ProtectedRoute>} />
+      <Route path="*" element={<NotFoundPage />} />
     </Routes>
   );
 };

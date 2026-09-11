@@ -10,7 +10,7 @@ import { useAuth } from '../context/AuthContext';
 const ProfilePage: React.FC = () => {
   const navigate = useNavigate();
   const { officer, resetDemo } = useDemo();
-  const { user, logout, changePassword } = useAuth();
+  const { user, logout, changePassword, isAuthenticated } = useAuth();
   const [showChangePwd, setShowChangePwd] = useState(false);
   const [currentPwd, setCurrentPwd] = useState('');
   const [newPwd, setNewPwd] = useState('');
@@ -72,7 +72,7 @@ const ProfilePage: React.FC = () => {
         </div>
       </Card>
 
-      <DemoTag label="DEMO OFFICER" className="w-fit" />
+      {isAuthenticated ? <DemoTag label="LIVE OFFICER PROFILE" className="w-fit" /> : <DemoTag label="DEMO OFFICER" className="w-fit" />}
 
       {/* Preferences */}
       <Card title="Preferences" subtitle="Demo settings (not persisted server-side)">

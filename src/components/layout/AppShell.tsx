@@ -1,22 +1,37 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import {
-  Home, ClipboardList, Plus, FileText, BarChart3, BookOpen, User, HelpCircle, LogOut, RotateCcw,
-  Bell, Menu, X,
+  Home, ClipboardList, Plus, FileText, BarChart3, BookOpen, User, LogOut, RotateCcw,
+  Bell, Menu, X, ShieldCheck, Settings,
 } from 'lucide-react';
 import { SatyaTagLogo, GovHeader } from '../Brand';
 import { useDemo } from '../../context/DemoContext';
 import { useAuth } from '../../context/AuthContext';
+import * as platform from '../../services/platform';
 
 export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const { resetDemo, inspection } = useDemo();
-  const { logout } = useAuth();
+  const { logout, isAuthenticated } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
+  const [notifications, setNotifications] = useState<platform.NotificationItem[]>([]);
+  const [unread, setUnread] = useState(0);
   const notifRef = useRef<HTMLDivElement>(null);
   const mobileMenuRef = useRef<HTMLDivElement>(null);
+
+  // Load real notifications from the backend when authenticated.
+  useEffect(() => {
+    if (!isAuthenticated) return;
+    platform.getNotifications().then((r) => {
+      setNotifications(r.items.slice(0, 8));
+      setUnread(r.unread_count);
+    }).catch(() => {
+      setNotifications([]);
+      setUnread(0);
+    });
+  }, [isAuthenticated]);
 
   useEffect(() => {
     setMobileMenuOpen(false);
@@ -38,7 +53,10 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
     { label: 'Inspections', path: '/inspections', icon: FileText },
     { label: 'Analytics', path: '/analytics', icon: BarChart3 },
     { label: 'Rule Library', path: '/rules', icon: BookOpen },
+    { label: 'Notifications', path: '/notifications', icon: Bell },
+    { label: 'Audit Trail', path: '/audit', icon: ShieldCheck },
     { label: 'Profile', path: '/profile', icon: User },
+    { label: 'Settings', path: '/settings', icon: Settings },
   ];
 
   const isActive = (path: string) => {
@@ -72,14 +90,14 @@ const handleReset = () => {
             {stageBadge}
             <button onClick={() => setNotifOpen((o) => !o)} className="relative rounded-lg p-2 text-slate-600 hover:bg-slate-100" aria-label="Notifications">
               <Bell className="h-5 w-5" />
-              <span className="absolute right-1 top-1 flex h-2 w-2 rounded-full bg-violation-500" />
+              {unread > 0 && <span className="absolute right-1 top-1 flex h-2 w-2 rounded-full bg-violation-500" />}
             </button>
             <div className="flex h-9 w-9 items-center justify-center rounded-full bg-navy-800 text-sm font-semibold text-white" title="A. Sharma">AS</div>
           </div>
           <div className="flex items-center gap-1 md:hidden">
             <button onClick={() => setNotifOpen((o) => !o)} className="relative rounded-lg p-2 text-slate-600 hover:bg-slate-100" aria-label="Notifications">
               <Bell className="h-5 w-5" />
-              <span className="absolute right-1 top-1 flex h-2 w-2 rounded-full bg-violation-500" />
+              {unread > 0 && <span className="absolute right-1 top-1 flex h-2 w-2 rounded-full bg-violation-500" />}
             </button>
             <button onClick={() => setMobileMenuOpen((o) => !o)} className="rounded-lg p-2 text-slate-600 hover:bg-slate-100" aria-label="Menu">
               {mobileMenuOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
@@ -92,10 +110,28 @@ const handleReset = () => {
 
         {notifOpen && (
           <div ref={notifRef} className="absolute right-2 top-16 z-50 w-80 rounded-card border border-slate-200 bg-white p-3 shadow-xl md:right-6">
-            <p className="mb-2 text-sm font-semibold text-navy-900">Notifications</p>
-            <div className="space-y-2 text-sm">
-              <p className="rounded-lg bg-slate-50 p-2.5 text-slate-600"><span className="font-medium text-navy-800">Demo inspection created</span> — INSP-DEMO-2025-03-12-0017</p>
-              <p className="rounded-lg bg-slate-50 p-2.5 text-slate-600">Rule Library updated with <span className="font-medium text-navy-800">Demo Rule Pack 2026.1</span></p>
+            <div className="mb-2 flex items-center justify-between">
+              <p className="text-sm font-semibold text-navy-900">Notifications</p>
+              <button onClick={() => navigate('/notifications')} className="text-[10px] font-medium text-govblue-600 hover:text-govblue-700">
+                View all {unread > 0 && <span className="ml-0.5 rounded-full bg-govblue-600 px-1.5 text-[9px] font-semibold text-white">{unread}</span>}
+              </button>
+            </div>
+            <div className="max-h-72 space-y-2 overflow-y-auto text-sm">
+              {notifications.length === 0 ? (
+                <p className="rounded-lg bg-slate-50 p-2.5 text-slate-600">No notifications yet.</p>
+              ) : (
+                notifications.map((n) => (
+                  <button key={n.id}
+                    onClick={() => {
+                      setNotifOpen(false);
+                      if (n.related_inspection_id) navigate(`/inspection/${n.related_inspection_id}/result`);
+                    }}
+                    className={`block w-full rounded-lg p-2.5 text-left text-slate-600 transition-colors hover:bg-slate-100 ${!n.is_read ? 'bg-govblue-50' : 'bg-slate-50'}`}>
+                    <span className="block font-medium text-navy-800">{n.title}</span>
+                    {n.body && <span className="mt-0.5 block text-xs text-slate-500">{n.body}</span>}
+                  </button>
+                ))
+              )}
             </div>
           </div>
         )}
@@ -165,8 +201,10 @@ const handleReset = () => {
           <div className="grid grid-cols-2 gap-2">
             <MenuTile icon={BarChart3} label="Analytics" onClick={() => navigate('/analytics')} />
             <MenuTile icon={BookOpen} label="Rule Library" onClick={() => navigate('/rules')} />
+            <MenuTile icon={Bell} label="Notifications" onClick={() => navigate('/notifications')} />
+            <MenuTile icon={ShieldCheck} label="Audit Trail" onClick={() => navigate('/audit')} />
             <MenuTile icon={User} label="Profile" onClick={() => navigate('/profile')} />
-            <MenuTile icon={HelpCircle} label="Help & Support" onClick={() => navigate('/profile')} />
+            <MenuTile icon={Settings} label="Settings" onClick={() => navigate('/settings')} />
           </div>
           <div className="mt-3 space-y-1 border-t border-slate-100 pt-3">
             <button onClick={handleReset} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100">

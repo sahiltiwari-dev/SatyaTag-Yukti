@@ -168,7 +168,7 @@ const AnalysePage: React.FC = () => {
               Start Analysis
             </Button>
           )}
-          <div className="flex justify-center"><DemoTag label="DEMO ANALYSIS" /></div>
+          <div className="flex justify-center">{isAuthenticated ? <DemoTag label="LIVE ANALYSIS" /> : <DemoTag label="DEMO ANALYSIS" />}</div>
         </>
       )}
 
@@ -232,7 +232,7 @@ const AnalysePage: React.FC = () => {
           </Card>
 
           <Button onClick={handleContinue} icon={ChevronRight} fullWidth size="lg">View Compliance Result</Button>
-          <div className="flex justify-center"><DemoTag label="DEMO ANALYSIS" /></div>
+          <div className="flex justify-center">{isAuthenticated ? <DemoTag label="LIVE ANALYSIS" /> : <DemoTag label="DEMO ANALYSIS" />}</div>
         </div>
       )}
     </div>
