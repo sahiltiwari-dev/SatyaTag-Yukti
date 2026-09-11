@@ -16,11 +16,16 @@ from app.models import User, UserProfile
 from app.models.enums import AccountStatus, UserRole
 from app.schemas.auth import (
     ChangePasswordRequest,
+    ForgotPasswordRequest,
     LoginRequest,
     LoginResponse,
+    OTPResponse,
+    ResetPasswordRequest,
+    ResendOtpRequest,
     SignupRequest,
     SignupResponse,
     UserOut,
+    VerifyEmailRequest,
     mask_email,
 )
 from app.services.audit import record_audit
@@ -197,3 +202,146 @@ def change_password(
     )
     db.commit()
     return {"message": "Password updated successfully."}
+
+
+# ---------------------------------------------------------------------------
+# Email verification (OTP)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/verify-email", status_code=status.HTTP_200_OK)
+def verify_email(
+    payload: VerifyEmailRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    from app.services.verification import verify_email_otp
+
+    try:
+        result = verify_email_otp(db, payload.email, payload.otp)
+    except ValueError as exc:
+        code = str(exc)
+        if code == "OTP_MAX_ATTEMPTS":
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="Too many wrong codes. Request a new one.",
+            )
+        if code.startswith("OTP_MISMATCH"):
+            _, remaining = code.split("|")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Incorrect code. {remaining} attempt(s) remaining.",
+            )
+        if code == "OTP_EXPIRED_NO_LIVE_CODE":
+            raise HTTPException(
+                status_code=status.HTTP_410_GONE,
+                detail="This code has expired. Request a new one.",
+            )
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid email or code.",
+        )
+
+    message = (
+        "Email already verified."
+        if result.get("already_verified")
+        else "Email verified. Your account is now active."
+    )
+    if not result.get("already_verified"):
+        record_audit(
+            db,
+            "ACCOUNT_ACTIVATED",
+            entity_type="user",
+            ip_address=_client_ip(request),
+        )
+        db.commit()
+    return {"message": message, "email_verified": True}
+
+
+@router.post("/resend-otp", response_model=OTPResponse)
+def resend_otp(
+    payload: ResendOtpRequest,
+    db: Session = Depends(get_db),
+):
+    from app.models import User as UserModel
+    from app.services.verification import issue_email_otp
+
+    user = db.query(UserModel).filter(UserModel.email == payload.email.lower()).first()
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No account found for this email.",
+        )
+    try:
+        result = issue_email_otp(db, user)
+    except ValueError as exc:
+        if str(exc) == "EMAIL_ALREADY_VERIFIED":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This email is already verified.",
+            )
+        raise
+
+    cooldown = result.get("cooldown_seconds")
+    if cooldown:
+        return OTPResponse(
+            message="A fresh code was recently sent. Try again shortly.",
+            masked_email=mask_email(user.email),
+            cooldown_seconds=cooldown,
+        )
+    return OTPResponse(
+        message="Verification code sent to your inbox.",
+        masked_email=mask_email(user.email),
+        cooldown_seconds=settings_otp_cooldown(),
+    )
+
+
+def settings_otp_cooldown() -> int:
+    from app.config import settings
+
+    return settings.otp_resend_cooldown_seconds
+
+
+# ---------------------------------------------------------------------------
+# Password reset
+# ---------------------------------------------------------------------------
+
+
+@router.post("/forgot-password", status_code=status.HTTP_200_OK)
+def forgot_password(
+    payload: ForgotPasswordRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    from app.services.verification import issue_password_reset
+
+    issue_password_reset(db, payload.email)
+    return {
+        "message": (
+            "If an account exists for this email, a reset link has been sent."
+        )
+    }
+
+
+@router.post("/reset-password", status_code=status.HTTP_200_OK)
+def reset_password(
+    payload: ResetPasswordRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    from app.services.verification import reset_password as reset_service
+
+    try:
+        reset_service(
+            db,
+            payload.email,
+            payload.token,
+            payload.new_password,
+            ip_hint=_client_ip(request),
+        )
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This reset link is invalid or has expired.",
+        )
+    return {"message": "Password reset. You can now sign in with your new password."}

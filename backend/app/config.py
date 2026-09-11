@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     otp_expiry_minutes: int = 10
     otp_max_attempts: int = 5
     otp_resend_cooldown_seconds: int = 60
+    password_reset_expiry_hours: int = 1
 
     # --- Storage ---
     upload_dir: str = "uploads"
