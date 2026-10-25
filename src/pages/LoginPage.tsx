@@ -253,12 +253,7 @@ const LoginPage: React.FC = () => {
                   <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
                 </button>
               </form>
-              <p className="mt-6 text-center text-sm text-slate-500">
-                Don't have an account?{' '}
-                <Link to="/signup" className="font-semibold text-govblue-600 transition-colors hover:text-govblue-700">
-                  Sign Up
-                </Link>
-              </p>
+
             </div>
           </div>
         </div>

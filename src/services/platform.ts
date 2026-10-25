@@ -160,6 +160,32 @@ export function updateMyProfile(patch: Record<string, unknown>): Promise<UserPro
 export function getSessions(): Promise<{ id: string; ip: string | null; user_agent: string | null; created_at: string | null }[]> {
   return apiRequest('/api/users/me/sessions');
 }
+export function adminListUsers(): Promise<UserProfileResult[]> {
+  return apiRequest<UserProfileResult[]>('/api/users');
+}
+
+export function adminCreateUser(payload: {
+  email: string;
+  full_name: string;
+  role?: string;
+  department?: string;
+  jurisdiction?: string;
+  employee_id?: string;
+  designation?: string;
+  phone?: string;
+}): Promise<UserProfileResult & { initial_password?: string }> {
+  return apiRequest('/api/users', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function adminUpdateUserStatus(userId: string, accountStatus: 'active' | 'disabled'): Promise<UserProfileResult> {
+  return apiRequest(`/api/users/${userId}/status`, {
+    method: 'PATCH',
+    body: JSON.stringify({ account_status: accountStatus }),
+  });
+}
 
 // --- Listing -------------------------------------------------------------
 

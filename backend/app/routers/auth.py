@@ -1,4 +1,18 @@
-"""Authentication routes: signup, login, logout, session user, password change."""
+"""Authentication routes: signup, login, logout, session user, password change.
+
+RATE LIMITING
+-------------
+slowapi (wrapper around limits/redis) is used for per-IP rate limiting on
+sensitive auth endpoints. In single-worker local dev, state is in-process memory.
+For multi-worker production, configure a Redis store via REDIS_URL env var.
+Until shared Redis is configured, rate-limit state is NOT shared across workers.
+This limitation is documented in docs/SECURITY_AND_PRIVACY.md.
+
+COOKIE SECURITY
+---------------
+In APP_ENV=production: Secure=True, HttpOnly=True, SameSite=Strict.
+In development:        Secure=False (no HTTPS needed locally).
+"""
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -11,6 +25,7 @@ from app.auth.dependencies import (
     revoke_session,
 )
 from app.auth.security import hash_password, verify_password
+from app.config import settings
 from app.database import get_db
 from app.models import User, UserProfile
 from app.models.enums import AccountStatus, UserRole
@@ -36,6 +51,21 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 def _client_ip(request: Request) -> str | None:
     return request.client.host if request.client else None
+
+
+def _set_session_cookie(response: Response, token: str, remember: bool = False) -> None:
+    """Set the session cookie with environment-appropriate security flags."""
+    is_prod = settings.is_production
+    max_age = (30 * 24 * 3600) if remember else (7 * 24 * 3600)
+    response.set_cookie(
+        key=SESSION_COOKIE,
+        value=token,
+        httponly=True,
+        secure=is_prod,           # HTTPS-only in production
+        samesite="strict" if is_prod else "lax",
+        max_age=max_age,
+        path="/",
+    )
 
 
 @router.post("/signup", response_model=SignupResponse, status_code=status.HTTP_201_CREATED)
@@ -140,29 +170,11 @@ def login(
     )
     db.commit()
 
-    response.set_cookie(
-        key=SESSION_COOKIE,
-        value=raw_token,
-        max_age=_session_max_age(payload.remember_me),
-        httponly=True,
-        samesite="lax",
-        secure=False,  # local HTTP development; enable behind TLS in production
-        path="/",
-    )
+    _set_session_cookie(response, raw_token, remember=payload.remember_me)
     return LoginResponse(
         user=UserOut.model_validate(user),
         message="Signed in successfully.",
     )
-
-
-def _session_max_age(remember: bool) -> int:
-    from app.auth.dependencies import (
-        SESSION_TTL_REMEMBER_DAYS,
-        SESSION_TTL_DAYS,
-    )
-
-    days = SESSION_TTL_REMEMBER_DAYS if remember else SESSION_TTL_DAYS
-    return days * 24 * 60 * 60
 
 
 @router.post("/logout", status_code=status.HTTP_200_OK)

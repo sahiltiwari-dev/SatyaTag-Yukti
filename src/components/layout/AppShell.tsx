@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import {
   Home, ClipboardList, Plus, FileText, BarChart3, BookOpen, User, LogOut, RotateCcw,
-  Bell, Menu, X, ShieldCheck, Settings,
+  Bell, Menu, X, ShieldCheck, Settings, Shield,
 } from 'lucide-react';
 import { SatyaTagLogo, GovHeader } from '../Brand';
 import { useDemo } from '../../context/DemoContext';
@@ -13,7 +13,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
   const navigate = useNavigate();
   const location = useLocation();
   const { resetDemo, inspection } = useDemo();
-  const { logout, isAuthenticated } = useAuth();
+  const { logout, isAuthenticated, user } = useAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
   const [notifications, setNotifications] = useState<platform.NotificationItem[]>([]);
@@ -49,6 +49,7 @@ export const AppShell: React.FC<{ children: React.ReactNode }> = ({ children }) 
 
   const desktopNav = [
     { label: 'Dashboard', path: '/dashboard', icon: Home },
+    ...(user?.role === 'admin' ? [{ label: 'Admin Users', path: '/admin/users', icon: Shield }] : []),
     { label: 'New Inspection', path: '/inspection/new', icon: ClipboardList, accent: true },
     { label: 'Inspections', path: '/inspections', icon: FileText },
     { label: 'Analytics', path: '/analytics', icon: BarChart3 },
@@ -199,6 +200,7 @@ const handleReset = () => {
         >
           <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">More</p>
           <div className="grid grid-cols-2 gap-2">
+            {user?.role === 'admin' && <MenuTile icon={Shield} label="Admin Users" onClick={() => navigate('/admin/users')} />}
             <MenuTile icon={BarChart3} label="Analytics" onClick={() => navigate('/analytics')} />
             <MenuTile icon={BookOpen} label="Rule Library" onClick={() => navigate('/rules')} />
             <MenuTile icon={Bell} label="Notifications" onClick={() => navigate('/notifications')} />

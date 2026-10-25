@@ -1,6 +1,21 @@
 """Online product listing checks — create listing records and run a deterministic
 demo listing analysis (checks declared price / quantity / seller info against
-the inspection's captured data)."""
+the inspection's captured data).
+
+SSRF PROTECTION
+---------------
+The `listing_url` field is validated on save to:
+  - Accept only http:// or https:// schemes
+  - Reject loopback, private-RFC, link-local, and cloud-metadata IP ranges
+  - Enforce a maximum URL length
+
+The application does NOT fetch the URL at runtime (no real web scraping).
+Validation prevents storage of obviously malicious URLs in the database.
+If real web scraping is added in future, revalidate DNS at fetch time.
+"""
+import ipaddress
+import socket
+import urllib.parse
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -15,6 +30,76 @@ from app.models.inspection import Inspection
 from app.models.user import User
 
 router = APIRouter(prefix="/api/inspections", tags=["listing"])
+
+# Maximum length for stored URLs.
+_MAX_URL_LENGTH = 2048
+
+# Private / loopback IP ranges that must never be fetched.
+_BLOCKED_NETWORKS = [
+    ipaddress.ip_network("127.0.0.0/8"),      # Loopback
+    ipaddress.ip_network("10.0.0.0/8"),        # RFC 1918
+    ipaddress.ip_network("172.16.0.0/12"),     # RFC 1918
+    ipaddress.ip_network("192.168.0.0/16"),    # RFC 1918
+    ipaddress.ip_network("169.254.0.0/16"),    # Link-local
+    ipaddress.ip_network("100.64.0.0/10"),     # Carrier-grade NAT
+    ipaddress.ip_network("::1/128"),           # IPv6 loopback
+    ipaddress.ip_network("fc00::/7"),          # IPv6 unique-local
+    ipaddress.ip_network("fe80::/10"),         # IPv6 link-local
+]
+
+
+def _validate_listing_url(url: str) -> str:
+    """Validate a product listing URL against basic SSRF and safety rules.
+
+    Returns the normalised URL on success. Raises HTTPException on failure.
+    This validation is a best-effort defence; it does NOT fetch the URL.
+    """
+    if not url or len(url) > _MAX_URL_LENGTH:
+        raise HTTPException(
+            400,
+            f"Listing URL must be between 1 and {_MAX_URL_LENGTH} characters.",
+        )
+
+    try:
+        parsed = urllib.parse.urlparse(url)
+    except Exception:
+        raise HTTPException(400, "Listing URL could not be parsed.")
+
+    if parsed.scheme not in ("http", "https"):
+        raise HTTPException(
+            400,
+            f"Listing URL scheme '{parsed.scheme}' is not allowed. "
+            "Only http:// and https:// URLs are accepted.",
+        )
+
+    hostname = parsed.hostname
+    if not hostname:
+        raise HTTPException(400, "Listing URL must include a hostname.")
+
+    # Resolve hostname to catch IP addresses disguised as hostnames.
+    try:
+        addr_info = socket.getaddrinfo(hostname, None, proto=socket.IPPROTO_TCP)
+        for _family, _type, _proto, _canonname, sockaddr in addr_info:
+            ip_str = sockaddr[0]
+            try:
+                addr = ipaddress.ip_address(ip_str)
+            except ValueError:
+                continue
+            for blocked in _BLOCKED_NETWORKS:
+                if addr in blocked:
+                    raise HTTPException(
+                        400,
+                        "Listing URL resolves to a private or reserved IP address. "
+                        "Only public internet URLs are accepted.",
+                    )
+    except HTTPException:
+        raise
+    except OSError:
+        # DNS resolution failure is acceptable here — we're storing, not fetching.
+        # If the URL were to be fetched, re-validate DNS at fetch time.
+        pass
+
+    return url
 
 
 class ListingCreate(BaseModel):
@@ -41,9 +126,11 @@ def create_listing(
     db: Session = Depends(get_db), user: User = Depends(get_current_user),
 ):
     insp = _get(db, inspection_id, user)
+    # Validate URL for scheme, length, and private/loopback IP blocks.
+    safe_url = _validate_listing_url(payload.listing_url)
     listing = ListingCheck(
         inspection_id=insp.id, platform_name=payload.platform_name,
-        listing_url=payload.listing_url, listing_title=payload.listing_title,
+        listing_url=safe_url, listing_title=payload.listing_title,
         listing_price=payload.listing_price, listing_quantity=payload.listing_quantity,
         seller_name=payload.seller_name, status=ListingCheckStatus.CREATED,
     )

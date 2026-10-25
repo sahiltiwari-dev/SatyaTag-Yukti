@@ -68,7 +68,7 @@ def test_evidence_upload_retrieve_replace_delete(db):
     assert r.headers["content-type"] == "image/png"
 
     # --- Re-upload replaces the previous evidence for the same surface ------
-    second_png = b"\x89PNG\r\n\x1a\n" + b"second-front-bytes-v2"
+    second_png = b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\rIDATx\x9cc``\xf8\xff\x1f\x00\x03\x02\x01\xff\xe6w\x0b\xae\x00\x00\x00\x00IEND\xaeB`\x82'
     r = client.post(
         f"/api/inspections/{iid}/evidence",
         files={"file": ("front-v2.png", second_png, "image/png")},

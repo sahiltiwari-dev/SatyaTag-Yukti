@@ -2,9 +2,16 @@
 
 Actual images are stored as real files under `settings.upload_root`
 (backend/uploads/). PostgreSQL stores metadata only. Uploads are validated:
-image-only, size-limited, safe filenames, no path traversal, ownership checks.
+  - Extension must be in ALLOWED_EXTENSIONS
+  - Client-supplied MIME type is checked against REJECTED_MIME_FRAGMENTS
+  - Actual file bytes are decoded by Pillow to verify the file is a real image
+    (magic-bytes detection). Client-claimed MIME is never trusted for safety.
+  - Size is capped at MAX_UPLOAD_BYTES
+  - Server-generated UUIDs are used for storage names (no path traversal)
+  - Ownership checks enforce RBAC
 """
 import hashlib
+import io
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -16,8 +23,12 @@ from sqlalchemy.orm import Session
 from app.auth.dependencies import get_current_user
 from app.config import settings
 from app.database import get_db
-from app.models.enums import QualityStatus, Surface, UserRole
-from app.models.evidence import EvidenceAsset
+from app.models.enums import QualityStatus, Surface, UserRole, ExtractionMode
+from app.models.evidence import EvidenceAsset, OCRResult, ExtractedField
+from app.services.ocr import run_paddle_ocr_bytes, is_ocr_available
+import logging
+
+logger = logging.getLogger(__name__)
 from app.models.inspection import Inspection
 from app.models.user import User
 
@@ -25,6 +36,9 @@ router = APIRouter(prefix="/api", tags=["evidence"])
 
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp"}
 REJECTED_MIME_FRAGMENTS = ("application/pdf", "text/", "video/", "audio/")
+
+# Pillow format names that map to accepted image types
+PILLOW_ALLOWED_FORMATS = {"JPEG", "PNG", "WEBP", "GIF", "BMP"}
 
 
 def _upload_root() -> Path:
@@ -64,7 +78,11 @@ def _evidence_for(db: Session, user: User, evidence_id: str):
 
 
 def _validated_extension(filename: str | None, content_type: str | None) -> tuple[str, str]:
-    """Returns (extension, mime). Raises 400 on invalid/unsupported files."""
+    """Returns (extension, mime). Raises 400 on invalid/unsupported files.
+
+    Only checks extension and client-supplied MIME. Actual bytes are verified
+    separately by _verify_image_bytes() using Pillow (magic-bytes detection).
+    """
     ext = Path(filename or "").suffix.lower()
     if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(
@@ -83,6 +101,45 @@ def _validated_extension(filename: str | None, content_type: str | None) -> tupl
             f"Unsupported content type '{mime}'. Expected an image.",
         )
     return ext, mime
+
+
+def _verify_image_bytes(data: bytes) -> str:
+    """Verify that the file bytes are actually a valid image using Pillow.
+
+    Returns the detected MIME type. Raises HTTP 400 if bytes are not a
+    recognisable image format, regardless of what the client claimed.
+
+    This prevents spoofed MIME types, scripts renamed with .png extensions,
+    and other content-type confusion attacks.
+    """
+    try:
+        from PIL import Image, UnidentifiedImageError
+
+        img = Image.open(io.BytesIO(data))
+        img.verify()  # Fully decode the header to catch truncated/corrupt files.
+        fmt = img.format  # e.g. "PNG", "JPEG", "WEBP"
+    except Exception:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            "File content does not match a supported image format. "
+            "Upload a valid JPG, PNG, WEBP, GIF, or BMP image.",
+        )
+
+    if fmt not in PILLOW_ALLOWED_FORMATS:
+        raise HTTPException(
+            status.HTTP_400_BAD_REQUEST,
+            f"Image format '{fmt}' is not accepted. "
+            "Upload a JPG, PNG, WEBP, GIF, or BMP image.",
+        )
+
+    mime_map = {
+        "JPEG": "image/jpeg",
+        "PNG": "image/png",
+        "WEBP": "image/webp",
+        "GIF": "image/gif",
+        "BMP": "image/bmp",
+    }
+    return mime_map.get(fmt, "image/jpeg")
 
 
 @router.post("/inspections/{inspection_id}/evidence", status_code=status.HTTP_201_CREATED)
@@ -106,7 +163,12 @@ async def upload_evidence(
             f"File size exceeds the {settings.max_upload_bytes // (1024 * 1024)} MB limit.",
         )
 
+    # Magic-bytes verification: use Pillow to confirm the bytes are a real image,
+    # regardless of what the client claimed in Content-Type or filename.
+    detected_mime = _verify_image_bytes(data)
     sha256_hex = hashlib.sha256(data).hexdigest()
+    # Use Pillow-detected MIME rather than client-supplied value.
+    mime = detected_mime
     insp_dir = _upload_root() / str(insp.id)
     insp_dir.mkdir(parents=True, exist_ok=True)
     stored_name = f"{uuid.uuid4().hex}{ext}"
@@ -154,6 +216,32 @@ async def upload_evidence(
             quality_score=quality_score,
         )
         db.add(ev)
+    db.flush()
+
+    try:
+        ocr_data = await run_paddle_ocr_bytes(data)
+        for line in ocr_data.get("lines", []):
+            db.add(OCRResult(
+                inspection_id=insp.id,
+                evidence_id=ev.id,
+                text=line["text"],
+                confidence=line["confidence"],
+            ))
+        extracted_dict = ocr_data.get("extracted", {})
+        for label, val in extracted_dict.items():
+            db.add(ExtractedField(
+                inspection_id=insp.id,
+                evidence_id=ev.id,
+                label=label.replace("_", " ").title(),
+                value=val,
+                source=f"{surface.value} image",
+                ocr_confidence=ocr_data.get("confidence", 90.0),
+                extraction_confidence=ocr_data.get("confidence", 90.0),
+                extraction_mode=ExtractionMode.OCR,
+                status="accepted"
+            ))
+    except Exception as e:
+        logger.exception("OCR execution failed for evidence %s: %s", ev.id, e)
 
     record_audit(db, "EVIDENCE_UPLOADED", actor_id=user.id, actor_email=user.email,
                  entity_type="evidence", metadata={"surface": surface.value,

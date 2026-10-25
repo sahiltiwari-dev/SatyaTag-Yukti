@@ -1,7 +1,7 @@
 """User accounts, profiles, sessions, OTPs and password-reset tokens."""
 import uuid
 from datetime import datetime
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from sqlalchemy import (
     Boolean,
@@ -9,6 +9,7 @@ from sqlalchemy import (
     Enum,
     ForeignKey,
     Integer,
+    JSON,
     String,
     Uuid,
     UniqueConstraint,
@@ -63,6 +64,11 @@ class UserProfile(Base, UUIDPkMixin, TimestampMixin):
     phone: Mapped[Optional[str]] = mapped_column(String(40))
     address: Mapped[Optional[str]] = mapped_column(String(255))
     avatar_url: Mapped[Optional[str]] = mapped_column(String(512))
+    # User preferences stored as a JSON blob.
+    # Acceptable keys: notify_email (bool), notify_analysis (bool),
+    # notify_system (bool), theme (str: "light"|"dark"|"system").
+    # New keys can be added without a migration (JSON column is already present).
+    preferences: Mapped[Optional[Dict[str, Any]]] = mapped_column(JSON, nullable=True)
 
     user: Mapped["User"] = relationship(back_populates="profile")
 
